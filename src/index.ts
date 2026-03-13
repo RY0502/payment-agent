@@ -1,39 +1,67 @@
 /**
- * LangChain Agent - Entry Point
+ * Payment Agent - Entry Point
  *
- * This file provides a simple CLI interface for testing the agent locally.
- * Run with: pnpm start
+ * This file provides a CLI interface for testing the payment agent.
+ * Run with: npm start
  */
 
 import "dotenv/config";
 import { agent } from "./agent.js";
+import { HumanMessage } from "@langchain/core/messages";
 
-console.log("🤖 LangChain Agent Started\n");
-console.log("Ask me anything! I can:");
-console.log("  • Perform calculations");
-console.log("  • Tell you the current time");
-console.log("  • Check the weather (simulated)");
-console.log("  • Search the knowledge base\n");
+console.log("🤖 Payment Agent Started\n");
+console.log("💳 Generic Payment Automation Agent");
+console.log("Features:");
+console.log("  • Vision-based element detection");
+console.log("  • Works across different payment websites");
+console.log("  • ReAct pattern (Reason → Act → Observe)");
+console.log("  • Automatic retry logic (5 attempts per step)");
+console.log("  • Payment success detection\n");
 
-// Example conversation
-const questions = [
-  "What time is it right now?",
-  "What's the weather like in San Francisco?",
-  "Calculate 42 * 17 + 100",
-];
+const paymentData = {
+  paymentType: "electricity",
+  accountNumber: "123456789",
+  amount: "150",
+  currency: "USD",
+  customerName: "John Doe",
+  email: "john@example.com",
+  mobileNumber: "1234567890",
+};
 
-for (const question of questions) {
-  console.log(`📝 User: ${question}\n`);
+const targetUrl = "https://example-electricity-payment.com";
 
-  try {
-    const result = await agent.invoke({
-      messages: [{ role: "user", content: question }],
-    });
+console.log("💳 Payment Data:");
+console.log(JSON.stringify(paymentData, null, 2));
+console.log("\n🌐 Target URL:", targetUrl);
+console.log("\n⏳ Starting payment process...\n");
 
-    // The result contains the agent's response
-    console.log(`🤖 Agent: ${result.messages.at(-1)?.content}\n`);
-    console.log("─".repeat(50) + "\n");
-  } catch (error) {
-    console.error("Error:", error);
+try {
+  const result = await agent.invoke({
+    messages: [
+      new HumanMessage(
+        `Complete the payment on ${targetUrl} using the provided payment data. Start by navigating to the website and analyzing the page.`
+      ),
+    ],
+    paymentData,
+    targetUrl,
+    currentUrl: "",
+    currentStep: "initial",
+    attemptCount: 0,
+    maxAttempts: 5,
+    isPaymentComplete: false,
+    confirmationDetails: "",
+    error: "",
+  });
+
+  if (result.isPaymentComplete) {
+    console.log("\n✅ Payment Successful!");
+    console.log("📋 Details:", result.confirmationDetails || "Payment completed successfully");
+    console.log("🔄 Attempts:", result.attemptCount);
+  } else {
+    console.log("\n❌ Payment Failed");
+    console.log("📋 Details:", result.error || "Payment failed - max attempts reached");
+    console.log("🔄 Attempts:", result.attemptCount);
   }
+} catch (error) {
+  console.error("\n💥 Error:", error);
 }
