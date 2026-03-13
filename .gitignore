@@ -1,14 +1,81 @@
-index.cjs
-index.js
-index.d.ts
-node_modules
-dist
-.pnpm-store
+# Dependencies
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+yarn-error.log
+package-lock.json
+pnpm-lock.yaml
 
-.turbo
-**/.turbo
-**/.eslintcache
+# Build outputs
+dist/
+build/
+out/
+*.js
+*.cjs
+*.mjs
+*.d.ts
+*.tsbuildinfo
+!jest.config.js
+!*.config.js
 
+# Environment variables
 .env
-.ipynb_checkpoints
+.env.local
+.env.*.local
+.env.development
+.env.production
 
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.cache/
+
+# Build tools
+.turbo/
+**/.turbo/
+**/.eslintcache
+.next/
+.nuxt/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# LangGraph API
+.langgraph_api/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Screenshots
+screenshots/
+*.png
+*.jpg
+*.jpeg
