@@ -22,8 +22,10 @@
     "@langchain/langgraph": "^1.2.1",
     "@langchain/openai": "^1.0.0",
     "@types/sharp": "^0.31.1",
+    "form-data": "^4.0.5",
     "groq-sdk": "^0.37.0",
     "langchain": "^1.2.3",
+    "mailgun.js": "^12.7.1",
     "playwright": "^1.58.2",
     "sharp": "^0.34.5",
     "zod": "^4.2.1"
