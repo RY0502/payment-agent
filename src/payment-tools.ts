@@ -1062,9 +1062,10 @@ export function createPaymentTools(
         if (notificationUrl && supabaseAnonKey) {
           try {
             console.log('Sending payment notification to Supabase function...');
+            console.log('Using paymentData from closure:', paymentData);
             
             const payload = {
-              paymentData: paymentData || {},
+              paymentData: paymentData || { paymentType: "unknown" },
               paymentUrl: qrImageUrl
             };
             
