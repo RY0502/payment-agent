@@ -18,6 +18,7 @@ import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 import { createPaymentTools } from "./payment-tools.js";
 import { PaymentData } from "./types.js";
+import { EmailService } from "./email-service.js";
 
 const groqApiKey = process.env.GROQ_API_KEY;
 
@@ -77,6 +78,36 @@ let vision: VisionAnalyzer | null = null;
 let tools: any[] = [];
 let llm: ChatGroq | null = null;
 let currentPaymentData: any = null;
+
+/**
+ * Clear all agent state before a new run to prevent data conflicts
+ * This ensures each payment run is completely independent
+ */
+async function clearAgentState() {
+  console.log("Clearing agent state for new run...");
+  
+  // Close browser if it exists
+  if (browser) {
+    try {
+      await browser.close();
+      console.log("Previous browser instance closed");
+    } catch (error) {
+      console.error("Error closing previous browser:", error);
+    }
+  }
+  
+  // Reset all global state
+  browser = null;
+  vision = null;
+  tools = [];
+  llm = null;
+  currentPaymentData = null;
+  
+  // Clear any timeout trackers
+  paymentStartTime.clear();
+  
+  console.log("Agent state cleared successfully");
+}
 
 async function ensureInitialized(paymentData?: any) {
   if (!browser) {
@@ -203,6 +234,12 @@ PAYMENT WAITING:
 - Do NOT manually check for success - let wait_for_payment handle it
 - Do NOT navigate or reload the page after initiating payment
 - wait_for_payment will return success/failure/unclear status
+
+CRITICAL: After wait_for_payment completes:
+- If wait_for_payment returns success=true, IMMEDIATELY call check_payment_success tool
+- This is MANDATORY to trigger cleanup and email notification
+- Do NOT skip this step - the browser won't close and email won't send without it
+- Example: wait_for_payment returns {"success": true} → NEXT STEP: call check_payment_success
 
 DIALOG/POPUP HANDLING:
 - Some websites show dialogs/popups after filling inputs or clicking buttons
@@ -365,19 +402,53 @@ async function cleanupNode(state: PaymentState) {
   
   console.log("Starting cleanup process...");
   
-  // Clear timeout tracker
+  // STEP 1: Send email notification if payment was successful
+  // IMPORTANT: This happens BEFORE screenshot deletion to ensure the file exists
+  if (state.isPaymentComplete) {
+    try {
+      console.log("Payment successful - preparing to send email notification...");
+      
+      // Take a final screenshot for email (saves to disk)
+      const screenshotPath = await browser!.captureScreenshot();
+      
+      // Extract website name from URL
+      const url = new URL(state.targetUrl);
+      const websiteName = url.hostname.replace('www.', '');
+      
+      // Send email with payment success details
+      // This reads the screenshot file from disk and sends it via Mailgun
+      const emailService = new EmailService();
+      const userEmail = state.paymentData?.email;
+      const emailResult = await emailService.sendPaymentSuccessEmail(
+        websiteName,
+        screenshotPath,
+        state.paymentData || {},
+        userEmail
+      );
+      
+      if (emailResult.success) {
+        console.log("✓ Payment success email sent successfully");
+      } else {
+        console.log("⚠ Email notification skipped:", emailResult.message);
+      }
+    } catch (error) {
+      console.error("Error sending payment success email:", error);
+      // Continue with cleanup even if email fails
+    }
+  }
+  
+  // STEP 2: Clear state and reset for next run
   const sessionId = state.targetUrl;
   paymentStartTime.delete(sessionId);
   
-  // Clear payment data context
   currentPaymentData = null;
   console.log("Cleared payment data context");
   
-  // Reset tools array to force recreation on next run
   tools = [];
   console.log("Reset tools array");
   
-  // Delete all screenshots
+  // STEP 3: Delete all screenshots (AFTER email has been sent)
+  // Safe to delete now because email service has already read and sent the file
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
@@ -452,8 +523,13 @@ const compiledGraph = workflow.compile();
 
 /**
  * Wrapped agent with error handling to ensure browser cleanup on exceptions
+ * Clears all state before each run to ensure independence between payment runs
  */
 const wrappedInvoke = async (input: any) => {
+  // Clear all agent state before starting a new run
+  // This ensures no conflicting data or messages from previous runs
+  await clearAgentState();
+  
   try {
     return await compiledGraph.invoke(input);
   } catch (error) {
