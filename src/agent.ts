@@ -96,12 +96,13 @@ async function clearAgentState() {
     }
   }
   
-  // Reset all global state
+  // Reset all global state except currentPaymentData
+  // currentPaymentData will be updated by ensureInitialized with new payment data
   browser = null;
   vision = null;
   tools = [];
   llm = null;
-  currentPaymentData = null;
+  // Note: NOT clearing currentPaymentData here - it will be updated in ensureInitialized
   
   // Clear any timeout trackers
   paymentStartTime.clear();
@@ -119,11 +120,16 @@ async function ensureInitialized(paymentData?: any) {
   }
   // Update payment data and recreate tools if data changed
   if (paymentData && JSON.stringify(paymentData) !== JSON.stringify(currentPaymentData)) {
-    console.log('Payment data updated, recreating tools with new data:', paymentData);
+    console.log('🔍 Payment data updated, recreating tools with new data:', JSON.stringify(paymentData));
+    console.log('🔍 Previous currentPaymentData was:', JSON.stringify(currentPaymentData));
     currentPaymentData = paymentData;
     tools = createPaymentTools(browser, vision, currentPaymentData);
+    console.log('🔍 Tools recreated with paymentData:', JSON.stringify(currentPaymentData));
   } else if (tools.length === 0) {
+    console.log('🔍 Creating tools for first time with currentPaymentData:', JSON.stringify(currentPaymentData));
     tools = createPaymentTools(browser, vision, currentPaymentData);
+  } else {
+    console.log('🔍 Tools already exist, currentPaymentData:', JSON.stringify(currentPaymentData));
   }
   if (!llm) {
     llm = new ChatGroq({
@@ -139,10 +145,111 @@ const PAYMENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const paymentStartTime = new Map<string, number>();
 
 async function agentNode(state: PaymentState) {
-  await ensureInitialized(state.paymentData);
+  // STEP 1: Extract payment data and URL from user message if not already provided
+  let paymentData = state.paymentData;
+  let targetUrl = state.targetUrl;
+  
+  // If paymentData is empty or only has paymentType, extract from user message
+  if (!paymentData || Object.keys(paymentData).length <= 1 || !paymentData.paymentType || paymentData.paymentType === "") {
+    console.log("🔍 Extracting payment details from user message...");
+    
+    // state.messages can contain strings or message objects
+    // Find the first message that looks like user input
+    let messageContent = "";
+    
+    for (const msg of state.messages) {
+      if (typeof msg === 'string') {
+        // Direct string message
+        messageContent = msg;
+        break;
+      } else if (msg && typeof msg === 'object') {
+        // Message object
+        const constructorName = msg.constructor?.name;
+        const role = (msg as any).role;
+        
+        if (constructorName === 'HumanMessage' || role === 'user' || role === 'human') {
+          messageContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          break;
+        }
+      }
+    }
+    
+    if (messageContent && messageContent.trim()) {
+      console.log("🔍 User message content:", messageContent.substring(0, 200));
+      
+      // Use LLM to extract structured data
+      await ensureInitialized();
+      const extractionPrompt = `Extract payment information from this message. The message may contain step-by-step instructions or numbered lists - extract ALL relevant payment details from the ENTIRE message including all steps.
+
+Return ONLY a JSON object with these fields (use empty string if not found):
+{
+  "paymentType": "electricity/water/gas/postpaid/prepaid/etc",
+  "accountNumber": "account/consumer/BP/CA number (any identifier for the account)",
+  "amount": "payment amount (just the number, no currency)",
+  "mobileNumber": "mobile number (10 digits, could be called 'jio number' or 'phone number')",
+  "email": "email address",
+  "customerName": "customer name",
+  "upiId": "UPI ID if mentioned (e.g., user@okicici, user@paytm)",
+  "paymentGateway": "Payment gateway if mentioned (e.g., BillDesk, City Union Bank, Razorpay)",
+  "targetUrl": "website URL to make payment (full URL starting with http/https)"
+}
+
+IMPORTANT: 
+- Look through ALL steps/instructions in the message
+- Extract mobile number even if called "jio number" or mentioned in step 2 or later
+- Extract account number even if called "BP number", "CA number", "consumer number", etc.
+- Extract amount even if mentioned as "10 rs", "500rs", "10 rupees" (just put the number like "10" or "500")
+- Extract UPI ID if mentioned anywhere (usually in format: username@bankname)
+- Extract payment gateway if mentioned (BillDesk, City Union Bank, etc.)
+- Extract URL from step 1 or anywhere it's mentioned
+
+User message: ${messageContent}
+
+Return ONLY the JSON object, no other text.`;
+
+      try {
+        const extractionResponse = await llm!.invoke([new SystemMessage(extractionPrompt)]);
+        const extractedText = typeof extractionResponse.content === 'string' ? extractionResponse.content : JSON.stringify(extractionResponse.content);
+        console.log("🔍 LLM extraction response:", extractedText);
+        
+        // Parse JSON from response
+        const jsonMatch = extractedText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const extracted = JSON.parse(jsonMatch[0]);
+          console.log("✓ Extracted payment data:", JSON.stringify(extracted));
+          
+          // Update paymentData and targetUrl
+          paymentData = {
+            paymentType: extracted.paymentType || "",
+            accountNumber: extracted.accountNumber || "",
+            amount: extracted.amount || "",
+            mobileNumber: extracted.mobileNumber || "",
+            email: extracted.email || "",
+            customerName: extracted.customerName || "",
+            upiId: extracted.upiId || "",
+            paymentGateway: extracted.paymentGateway || "",
+          };
+          
+          targetUrl = extracted.targetUrl || state.targetUrl;
+          
+          // Update state with extracted data
+          state.paymentData = paymentData;
+          state.targetUrl = targetUrl;
+        } else {
+          console.log("⚠ No JSON found in LLM response");
+        }
+      } catch (error) {
+        console.error("Error extracting payment data:", error);
+      }
+    } else {
+      console.log("⚠ No user message content found in state.messages");
+    }
+  }
+  
+  await ensureInitialized(paymentData);
   
   // Check for timeout
-  const sessionId = state.targetUrl;
+  const sessionId = targetUrl;
   if (!paymentStartTime.has(sessionId)) {
     paymentStartTime.set(sessionId, Date.now());
   }
@@ -279,6 +386,8 @@ Use tools to interact with the page. Adapt to what you see on each page.`;
     const response = await llmWithTools.invoke(messages);
     return {
       messages: [response],
+      paymentData: paymentData,
+      targetUrl: targetUrl,
     };
   } catch (error: any) {
     console.error("Error in agent LLM call:", error);
@@ -329,6 +438,8 @@ async function toolNode(state: PaymentState) {
   const toolCalls = lastMessage.tool_calls || [];
 
   const toolMessages = [];
+  let waitForPaymentSuccess = false;
+  
   for (const toolCall of toolCalls) {
     const tool = tools.find((t) => t.name === toolCall.name);
     if (tool) {
@@ -341,6 +452,19 @@ async function toolNode(state: PaymentState) {
             name: toolCall.name,
           })
         );
+        
+        // Check if wait_for_payment returned success
+        if (toolCall.name === 'wait_for_payment') {
+          try {
+            const parsedResult = JSON.parse(result);
+            if (parsedResult.success === true) {
+              console.log('wait_for_payment detected success - will trigger check_success');
+              waitForPaymentSuccess = true;
+            }
+          } catch (parseError) {
+            // Result not JSON or doesn't have success field
+          }
+        }
       } catch (error) {
         toolMessages.push(
           new ToolMessage({
@@ -354,6 +478,32 @@ async function toolNode(state: PaymentState) {
   }
 
   const currentUrl = await browser!.getCurrentUrl();
+
+  // If wait_for_payment detected success, automatically trigger check_success
+  if (waitForPaymentSuccess) {
+    console.log('Automatically triggering payment success check...');
+    try {
+      const screenshot = await browser!.captureScreenshot();
+      const pageText = await browser!.getPageText();
+      const isSuccess = await vision!.detectPaymentSuccess(screenshot, pageText);
+      
+      if (isSuccess) {
+        console.log('Payment success confirmed by vision analysis');
+        return {
+          messages: toolMessages,
+          currentUrl,
+          attemptCount: state.attemptCount + 1,
+          isPaymentComplete: true,
+          confirmationDetails: pageText.substring(0, 500),
+          screenshot,
+        };
+      } else {
+        console.log('Vision analysis did not confirm payment success, continuing...');
+      }
+    } catch (error) {
+      console.error('Error during automatic success check:', error);
+    }
+  }
 
   return {
     messages: toolMessages,
@@ -428,6 +578,13 @@ async function cleanupNode(state: PaymentState) {
       
       if (emailResult.success) {
         console.log("✓ Payment success email sent successfully");
+        
+        // Emit JSON status message with payment data
+        const statusMessage = {
+          status: "success",
+          paymentData: state.paymentData || {}
+        };
+        console.log("\n" + JSON.stringify(statusMessage, null, 2) + "\n");
       } else {
         console.log("⚠ Email notification skipped:", emailResult.message);
       }
@@ -504,6 +661,23 @@ function afterCheckSuccess(state: PaymentState): string {
   return "agent";
 }
 
+function afterTools(state: PaymentState): string {
+  // If payment is complete (set by toolNode when wait_for_payment succeeds), go to cleanup
+  if (state.isPaymentComplete) {
+    console.log("Routing to cleanup after tools (payment complete)");
+    return "cleanup";
+  }
+  
+  // If max attempts reached, go to cleanup
+  if (state.attemptCount >= state.maxAttempts) {
+    console.log("Routing to cleanup after tools (max attempts)");
+    return "cleanup";
+  }
+  
+  // Otherwise continue to agent
+  return "agent";
+}
+
 const workflow = new StateGraph(PaymentStateAnnotation)
   .addNode("agent", agentNode)
   .addNode("tools", toolNode)
@@ -511,7 +685,7 @@ const workflow = new StateGraph(PaymentStateAnnotation)
   .addNode("cleanup", cleanupNode)
   .addEdge(START, "agent")
   .addConditionalEdges("agent", shouldContinue)
-  .addEdge("tools", "agent")
+  .addConditionalEdges("tools", afterTools)  // Changed from .addEdge to .addConditionalEdges
   .addConditionalEdges("check_success", afterCheckSuccess)
   .addEdge("cleanup", END);
 
@@ -526,6 +700,9 @@ const compiledGraph = workflow.compile();
  * Clears all state before each run to ensure independence between payment runs
  */
 const wrappedInvoke = async (input: any) => {
+  // Debug: Log input paymentData
+  console.log('🔍 wrappedInvoke called with input.paymentData:', JSON.stringify(input.paymentData));
+  
   // Clear all agent state before starting a new run
   // This ensures no conflicting data or messages from previous runs
   await clearAgentState();
