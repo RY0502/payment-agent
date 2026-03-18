@@ -9,6 +9,8 @@ export interface PaymentData {
   customerName?: string;
   mobileNumber?: string;
   email?: string;
+  upiId?: string;
+  paymentGateway?: string;
   [key: string]: string | undefined;
 }
 
