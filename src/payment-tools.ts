@@ -619,12 +619,20 @@ export function createPaymentTools(
           return "No active page found.";
         }
 
-        const waitTime = 5 * 60 * 1000; // 5 minutes
-        console.log('Waiting exactly 5 minutes for payment completion...');
+        const totalWaitTime = 5 * 60 * 1000; // 5 minutes
+        const heartbeatInterval = 30 * 1000; // Send heartbeat every 30 seconds
+        const iterations = Math.floor(totalWaitTime / heartbeatInterval);
+        
+        console.log('Waiting 5 minutes for payment completion...');
         console.log('Note: Staying on current page, waiting for automatic redirect to success page');
+        console.log(`Sending heartbeat every ${heartbeatInterval / 1000} seconds to keep connection alive`);
 
-        // Wait exactly 5 minutes
-        await page.waitForTimeout(waitTime);
+        // Wait in intervals with heartbeat messages
+        for (let i = 0; i < iterations; i++) {
+          await page.waitForTimeout(heartbeatInterval);
+          const elapsed = ((i + 1) * heartbeatInterval) / 1000;
+          console.log(`⏱️ Payment wait progress: ${elapsed}s / 300s (${Math.round((elapsed / 300) * 100)}%)`);
+        }
 
         console.log('5 minutes elapsed, checking payment status now...');
 
