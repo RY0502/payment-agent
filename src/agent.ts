@@ -558,39 +558,55 @@ async function cleanupNode(state: PaymentState) {
     try {
       console.log("Payment successful - preparing to send email notification...");
       
-      // Take a final screenshot for email (saves to disk)
-      const screenshotPath = await browser!.captureScreenshot();
+      // Get the last screenshot path (already saved to disk by checkSuccessNode)
+      const screenshotPath = browser!.getLastScreenshotPath();
       
-      // Extract website name from URL
-      const url = new URL(state.targetUrl);
-      const websiteName = url.hostname.replace('www.', '');
-      
-      // Send email with payment success details
-      // This reads the screenshot file from disk and sends it via Mailgun
-      const emailService = new EmailService();
-      const userEmail = state.paymentData?.email;
-      const emailResult = await emailService.sendPaymentSuccessEmail(
-        websiteName,
-        screenshotPath,
-        state.paymentData || {},
-        userEmail
-      );
-      
-      if (emailResult.success) {
-        console.log("✓ Payment success email sent successfully");
-        
-        // Emit JSON status message with payment data
-        const statusMessage = {
-          status: "success",
-          paymentData: state.paymentData || {}
-        };
-        console.log("\n" + JSON.stringify(statusMessage, null, 2) + "\n");
+      if (!screenshotPath) {
+        console.log("⚠ No screenshot available for email");
       } else {
-        console.log("⚠ Email notification skipped:", emailResult.message);
+        // Extract website name from URL
+        const url = new URL(state.targetUrl);
+        const websiteName = url.hostname.replace('www.', '');
+        
+        // Send email with payment success details
+        // This reads the screenshot file from disk and sends it via Mailgun
+        const emailService = new EmailService();
+        const userEmail = state.paymentData?.email;
+        const emailResult = await emailService.sendPaymentSuccessEmail(
+          websiteName,
+          screenshotPath,
+          state.paymentData || {},
+          userEmail
+        );
+        
+        if (emailResult.success) {
+          console.log("✓ Payment success email sent successfully");
+        } else {
+          console.log("⚠ Email notification skipped:", emailResult.message);
+        }
       }
+      
+      // ALWAYS emit JSON status message with payment data (regardless of email status)
+      const statusMessage = {
+        status: "success",
+        paymentData: state.paymentData || {}
+      };
+      console.log("\n=== PAYMENT SUCCESS ===");
+      console.log(JSON.stringify(statusMessage, null, 2));
+      console.log("======================\n");
+      
     } catch (error) {
-      console.error("Error sending payment success email:", error);
-      // Continue with cleanup even if email fails
+      console.error("Error in cleanup process:", error);
+      
+      // Still emit success message even if email fails
+      const statusMessage = {
+        status: "success",
+        paymentData: state.paymentData || {},
+        note: "Email sending failed but payment was successful"
+      };
+      console.log("\n=== PAYMENT SUCCESS ===");
+      console.log(JSON.stringify(statusMessage, null, 2));
+      console.log("======================\n");
     }
   }
   
