@@ -20,9 +20,21 @@ export class BrowserManager {
     // Create screenshots directory if it doesn't exist
     await fs.mkdir(SCREENSHOTS_DIR, { recursive: true });
 
+    // Check if running in production/server environment
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.HEADLESS === 'true';
+
     this.browser = await chromium.launch({
-      headless: false,
-      args: ["--disable-blink-features=AutomationControlled"],
+      headless: isProduction,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--no-first-run",
+        "--no-zygote",
+        "--disable-gpu"
+      ],
     });
 
     this.context = await this.browser.newContext({
