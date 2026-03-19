@@ -14,6 +14,7 @@ export class BrowserManager {
   private screenshotCounter: number = 0;
   private sessionId: string = Date.now().toString();
   private lastDialog: any = null;
+  private lastScreenshotPath: string = '';
 
   async initialize(): Promise<void> {
     // Create screenshots directory if it doesn't exist
@@ -55,8 +56,8 @@ export class BrowserManager {
   async captureScreenshot(): Promise<string> {
     if (!this.page) throw new Error("Browser not initialized");
     
-    // Generate unique filename for this screenshot
-    const filename = `screenshot_${this.sessionId}_${this.screenshotCounter++}.png`;
+    // Generate short unique filename to avoid ENAMETOOLONG error
+    const filename = `ss_${this.screenshotCounter++}.png`;
     const filepath = path.join(SCREENSHOTS_DIR, filename);
     
     // Save screenshot to disk
@@ -66,9 +67,16 @@ export class BrowserManager {
       path: filepath,
     });
     
+    // Store filepath for email service
+    this.lastScreenshotPath = filepath;
+    
     // Read file and convert to base64 for vision API
     const buffer = await fs.readFile(filepath);
     return buffer.toString("base64");
+  }
+
+  getLastScreenshotPath(): string {
+    return this.lastScreenshotPath;
   }
 
   async getAccessibilityTree(): Promise<string> {
