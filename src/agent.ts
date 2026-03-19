@@ -547,10 +547,12 @@ function shouldContinue(state: PaymentState): string {
   return END;
 }
 
-async function cleanupNode(state: PaymentState) {
+async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> {
   await ensureInitialized();
   
   console.log("Starting cleanup process...");
+  
+  let successMessageToAdd: string | null = null;
   
   // STEP 1: Send email notification if payment was successful
   // IMPORTANT: This happens BEFORE screenshot deletion to ensure the file exists
@@ -586,11 +588,12 @@ async function cleanupNode(state: PaymentState) {
         }
       }
       
-      // ALWAYS emit JSON status message with payment data (regardless of email status)
+      // Create success message to add to state
       const statusMessage = {
         status: "success",
         paymentData: state.paymentData || {}
       };
+      successMessageToAdd = `🎉 PAYMENT SUCCESS\n${JSON.stringify(statusMessage, null, 2)}`;
       console.log("\n=== PAYMENT SUCCESS ===");
       console.log(JSON.stringify(statusMessage, null, 2));
       console.log("======================\n");
@@ -598,12 +601,13 @@ async function cleanupNode(state: PaymentState) {
     } catch (error) {
       console.error("Error in cleanup process:", error);
       
-      // Still emit success message even if email fails
+      // Still create success message even if email fails
       const statusMessage = {
         status: "success",
         paymentData: state.paymentData || {},
         note: "Email sending failed but payment was successful"
       };
+      successMessageToAdd = `🎉 PAYMENT SUCCESS\n${JSON.stringify(statusMessage, null, 2)}`;
       console.log("\n=== PAYMENT SUCCESS ===");
       console.log(JSON.stringify(statusMessage, null, 2));
       console.log("======================\n");
@@ -659,6 +663,13 @@ async function cleanupNode(state: PaymentState) {
   console.log("Reset vision analyzer");
   
   console.log("Cleanup process completed");
+
+  // Return updated state with success message added to messages array
+  if (successMessageToAdd) {
+    return {
+      messages: [...state.messages, successMessageToAdd],
+    };
+  }
 
   return {
     messages: state.messages,
