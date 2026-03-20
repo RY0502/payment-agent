@@ -550,13 +550,16 @@ function shouldContinue(state: PaymentState): string {
 async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> {
   await ensureInitialized();
   
-  console.log("Starting cleanup process...");
+  const isSuccess = state.isPaymentComplete === true;
+  const isFailed = state.attemptCount >= state.maxAttempts || !!state.error;
+  
+  console.log(`Starting cleanup process... (Success: ${isSuccess}, Failed: ${isFailed})`);
   
   let successMessageToAdd: string | null = null;
   
   // STEP 1: Send email notification if payment was successful
   // IMPORTANT: This happens BEFORE screenshot deletion to ensure the file exists
-  if (state.isPaymentComplete) {
+  if (isSuccess) {
     try {
       console.log("Payment successful - preparing to send email notification...");
       
@@ -612,6 +615,20 @@ async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> 
       console.log(JSON.stringify(statusMessage, null, 2));
       console.log("======================\n");
     }
+  } else if (isFailed) {
+    // Log failure for debugging
+    console.log("\n=== PAYMENT FAILED ===");
+    console.log(`Reason: ${state.error || 'Max attempts reached'}`);
+    console.log(`Attempts: ${state.attemptCount}/${state.maxAttempts}`);
+    console.log("======================\n");
+    
+    const failureMessage = {
+      status: "failed",
+      reason: state.error || "Max attempts reached",
+      attemptCount: state.attemptCount,
+      maxAttempts: state.maxAttempts
+    };
+    successMessageToAdd = `❌ PAYMENT FAILED\n${JSON.stringify(failureMessage, null, 2)}`;
   }
   
   // STEP 2: Clear state and reset for next run
@@ -682,6 +699,9 @@ function afterCheckSuccess(state: PaymentState): string {
   }
 
   if (state.attemptCount >= state.maxAttempts) {
+    console.log("Max attempts reached, clearing timeout tracker and routing to cleanup");
+    // Clear timeout tracker for failed payment
+    paymentStartTime.delete(state.targetUrl);
     return "cleanup";
   }
 
@@ -698,7 +718,15 @@ function afterTools(state: PaymentState): string {
   // If max attempts reached, go to cleanup
   if (state.attemptCount >= state.maxAttempts) {
     console.log("Routing to cleanup after tools (max attempts)");
+    // Clear timeout tracker for failed payment
+    paymentStartTime.delete(state.targetUrl);
     return "cleanup";
+  }
+  
+  // If error occurred, clear timeout tracker
+  if (state.error) {
+    console.log("Error detected, clearing timeout tracker");
+    paymentStartTime.delete(state.targetUrl);
   }
   
   // Otherwise continue to agent
