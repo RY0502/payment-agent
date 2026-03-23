@@ -667,12 +667,13 @@ export function createPaymentTools(
           }
         }
 
-        // No clear success or failure
-        console.log('Payment status unclear after 5 minutes');
+        // No clear success or failure - payment likely not completed
+        console.log('⚠️  Payment status unclear after 5 minutes - likely not completed');
+        console.log('Page did not show success or failure confirmation');
         return JSON.stringify({
           success: false,
-          message: "Payment status unclear: No confirmation or failure detected after 5 minutes.",
-          reason: "unclear",
+          message: "Payment not completed: No confirmation detected after 5 minutes. Payment likely timed out or was not initiated.",
+          reason: "timeout_no_payment",
           elapsedSeconds: 300
         }, null, 2);
       } catch (error) {
@@ -1061,23 +1062,23 @@ export function createPaymentTools(
           return "No UPI QR code found on the current page. The QR code may still be loading or not present.";
         }
 
-        console.log('QR code image URL extracted:', qrImageUrl);
+        console.log('✅ QR code image URL extracted:', qrImageUrl);
 
         // Send QR URL to user's phone via HTTP POST to Supabase function
         const notificationUrl = process.env.PAYMENT_NOTIFICATION_URL;
         const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
         
+        console.log('\n=== PUSH NOTIFICATION STATUS ===');
         if (notificationUrl && supabaseAnonKey) {
           try {
-            console.log('Sending payment notification to Supabase function...');
-            console.log('Using paymentData from closure:', paymentData);
+            console.log('📱 Sending payment notification to user\'s phone...');
+            console.log('Notification URL:', notificationUrl);
+            console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
             
             const payload = {
               paymentData: paymentData || { paymentType: "unknown" },
               paymentUrl: qrImageUrl
             };
-            
-            console.log('Payload:', JSON.stringify(payload, null, 2));
             
             const response = await fetch(notificationUrl, {
               method: 'POST',
@@ -1090,17 +1091,29 @@ export function createPaymentTools(
             
             if (response.ok) {
               const responseData = await response.text();
-              console.log('Payment notification sent successfully:', responseData);
+              console.log('✅ NOTIFICATION SENT SUCCESSFULLY!');
+              console.log('Response:', responseData);
             } else {
               const errorText = await response.text();
-              console.error('Failed to send payment notification:', response.status, errorText);
+              console.error('❌ NOTIFICATION FAILED!');
+              console.error('Status:', response.status);
+              console.error('Error:', errorText);
             }
           } catch (error) {
-            console.error('Error sending payment notification:', error);
+            console.error('❌ NOTIFICATION ERROR!');
+            console.error('Error details:', error);
           }
         } else {
-          console.log('PAYMENT_NOTIFICATION_URL or SUPABASE_ANON_KEY not configured, skipping notification');
+          console.log('⚠️  NOTIFICATION NOT CONFIGURED!');
+          console.log('Missing environment variables:');
+          if (!notificationUrl) console.log('  - PAYMENT_NOTIFICATION_URL is not set');
+          if (!supabaseAnonKey) console.log('  - SUPABASE_ANON_KEY is not set');
+          console.log('\nTo enable push notifications, add these to your .env file:');
+          console.log('  PAYMENT_NOTIFICATION_URL=https://your-supabase-function-url');
+          console.log('  SUPABASE_ANON_KEY=your-supabase-anon-key');
+          console.log('\nUser will NOT receive QR code on their phone.');
         }
+        console.log('================================\n');
 
         return JSON.stringify({
           success: true,
