@@ -348,6 +348,13 @@ CRITICAL: After wait_for_payment completes:
 - Do NOT skip this step - the browser won't close and email won't send without it
 - Example: wait_for_payment returns {"success": true} → NEXT STEP: call check_payment_success
 
+CRITICAL: After wait_for_payment returns failure or timeout:
+- If wait_for_payment returns success=false (timeout, unclear, or failure), DO NOT retry
+- DO NOT extract QR code again
+- DO NOT restart the payment flow
+- The payment has failed - accept this and stop
+- The system will automatically clean up and report failure
+
 DIALOG/POPUP HANDLING:
 - Some websites show dialogs/popups after filling inputs or clicking buttons
 - If you see a dialog message in console logs, use handle_dialog tool
