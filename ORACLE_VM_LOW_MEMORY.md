@@ -13,14 +13,32 @@ Running the payment agent on Oracle VM with 1GB RAM causes:
 
 The error `libatk-1.0.so.0: cannot open shared object file` means required libraries are missing.
 
-**On Oracle Linux/RHEL/CentOS:**
+#### Method 1: Use Playwright's Built-in Installer (Recommended - Lightweight)
+
+Playwright can automatically install all required dependencies:
 
 ```bash
-# Update package manager
-sudo yum update -y
+cd /home/opc/payment-agent-main
 
-# Install Chromium dependencies
-sudo yum install -y \
+# Install system dependencies using Playwright
+pnpm exec playwright install-deps chromium
+
+# This will automatically detect your OS and install required libraries
+```
+
+**Advantages:**
+- ✅ Lightweight - only installs what's needed
+- ✅ Works even if yum is broken
+- ✅ Automatically detects OS and architecture
+- ✅ No manual package selection
+
+#### Method 2: Manual Installation with dnf (If yum doesn't work)
+
+Oracle Linux 8+ uses `dnf` instead of `yum`:
+
+```bash
+# Try dnf instead of yum
+sudo dnf install -y \
     nss \
     nspr \
     atk \
@@ -37,14 +55,86 @@ sudo yum install -y \
     pango \
     cairo \
     alsa-lib \
-    at-spi2-core \
-    libxshmfence
+    at-spi2-core
 
 # Install fonts
-sudo yum install -y \
+sudo dnf install -y \
     liberation-fonts \
-    google-noto-emoji-fonts \
-    google-noto-sans-cjk-fonts
+    google-noto-emoji-fonts
+```
+
+#### Method 3: Download and Install RPMs Manually (If package managers fail)
+
+```bash
+# Create temp directory
+mkdir -p ~/chrome-deps
+cd ~/chrome-deps
+
+# Download essential RPMs (Oracle Linux 8 x86_64)
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/atk-2.28.1-1.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/at-spi2-atk-2.26.2-1.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/at-spi2-core-2.28.0-1.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/appstream/x86_64/getPackage/mesa-libgbm-21.1.5-1.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/libXcomposite-0.4.4-14.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/libXdamage-1.1.4-14.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/libXrandr-1.5.2-1.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/pango-1.42.4-8.el8.x86_64.rpm
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/cairo-1.15.12-6.el8.x86_64.rpm
+
+# Install all RPMs
+sudo rpm -ivh *.rpm --nodeps
+
+# Clean up
+cd ~
+rm -rf ~/chrome-deps
+```
+
+#### Method 4: Use Minimal Dependencies (Absolute Minimum)
+
+If all else fails, install only the critical libraries:
+
+```bash
+# Download just the essential library that's missing
+cd /tmp
+wget http://yum.oracle.com/repo/OracleLinux/OL8/baseos/latest/x86_64/getPackage/atk-2.28.1-1.el8.x86_64.rpm
+sudo rpm -ivh atk-2.28.1-1.el8.x86_64.rpm --nodeps
+
+# Verify it's installed
+ls -la /usr/lib64/libatk-1.0.so.0
+```
+
+#### Method 5: On Ubuntu/Debian (If using)
+
+```bash
+# Update package list
+sudo apt-get update
+
+# Install Chromium dependencies
+sudo apt-get install -y \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    libxshmfence1
+
+# Install fonts
+sudo apt-get install -y \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    fonts-noto-cjk
 ```
 
 **On Ubuntu/Debian (if using):**
