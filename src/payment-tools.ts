@@ -699,7 +699,38 @@ export function createPaymentTools(
 
         console.log(`Attempting to select payment option: ${paymentMethodName}`);
 
-        // Strategy 0: Try clicking visible wrapper element with role="radio" (for hidden radio buttons)
+        // Strategy 0A: Try clicking tab/link elements (for BillDesk-style tabbed payment methods)
+        // Handles structures like: <li><a data-value="..." href="#tab16"><i class="bdi bdi-upi"></i><span>&nbsp;</span></a></li>
+        try {
+          const keywords = paymentMethodName.toLowerCase().replace(/\s+/g, '');
+          
+          console.log(`Strategy 0A: Looking for tab/link with keyword: ${keywords}`);
+          
+          // Try finding link/anchor with data-value, href, or icon class containing payment method name
+          // Note: BillDesk uses data-value="txtBankIDUPI-CPH" and icon class "bdi bdi-upi"
+          const tabLocator = page.locator(
+            `a[data-value*="${keywords}" i], ` +
+            `a[href*="${keywords}" i], ` +
+            `a:has(i[class*="${keywords}" i]), ` +  // Matches <i class="bdi bdi-upi">
+            `a:has(.bdi-${keywords}), ` +
+            `li:has-text("${paymentMethodName}") > a`
+          );
+          const count = await tabLocator.count();
+          
+          console.log(`Strategy 0A: Found ${count} matching tab/link elements`);
+          
+          if (count > 0) {
+            await tabLocator.first().click({ timeout: 15000 });
+            console.log(`✅ Selected payment option by clicking tab/link element`);
+            // Wait for tab content to load
+            await page.waitForTimeout(1000);
+            return `Successfully selected "${paymentMethodName}" payment option using tab/link`;
+          }
+        } catch (e0a) {
+          console.log(`Strategy 0A (tab/link) failed: ${e0a}`);
+        }
+
+        // Strategy 0B: Try clicking visible wrapper element with role="radio" (for hidden radio buttons)
         // This handles cases like <span role="radio" id="billdesk"> wrapping <input id="billdesk-RB">
         try {
           const keywords = paymentMethodName.toLowerCase().replace(/\s+/g, '');
@@ -710,26 +741,50 @@ export function createPaymentTools(
             console.log(`Selected payment option using visible wrapper with role=radio`);
             return `Successfully selected "${paymentMethodName}" payment option using wrapper element`;
           }
-        } catch (e0) {
-          console.log(`Strategy 0 failed: ${e0}`);
+        } catch (e0b) {
+          console.log(`Strategy 0B failed: ${e0b}`);
         }
 
-        // Strategy 1: Try radio button by ID or name attribute, handle hidden radios
+        // Strategy 1: Try radio button by data-title, ID or name attribute, handle hidden radios
         try {
           const keywords = paymentMethodName.toLowerCase().replace(/\s+/g, '');
-          const radioLocator = page.locator(`input[type="radio"][id*="${keywords}" i], input[type="radio"][name*="${keywords}" i]`);
-          const count = await radioLocator.count();
+          
+          // First try data-title attribute (used by BillDesk for UPI apps like GooglePay, PhonePe)
+          console.log(`Strategy 1: Looking for radio with data-title="${paymentMethodName}"`);
+          let radioLocator = page.locator(`input[type="radio"][data-title="${paymentMethodName}" i]`);
+          let count = await radioLocator.count();
+          
+          console.log(`Strategy 1: Found ${count} radios with data-title`);
+          
+          // If not found, try ID or name attribute
+          if (count === 0) {
+            radioLocator = page.locator(`input[type="radio"][id*="${keywords}" i], input[type="radio"][name*="${keywords}" i]`);
+            count = await radioLocator.count();
+            console.log(`Strategy 1: Found ${count} radios with id/name`);
+          }
+          
           if (count > 0) {
             const radio = radioLocator.first();
             const isVisible = await radio.isVisible().catch(() => false);
             
             if (isVisible) {
               await radio.click({ timeout: 15000 });
-              console.log(`Selected payment option using visible radio button`);
+              console.log(`✅ Selected payment option using visible radio button`);
               return `Successfully selected "${paymentMethodName}" payment option using radio button`;
             } else {
               // Radio is hidden, try to find and click associated label or wrapper
               console.log(`Radio button is hidden, looking for clickable wrapper...`);
+              
+              // Try clicking parent label first (common for BillDesk UPI apps)
+              const parent = radio.locator('..');
+              const parentTag = await parent.evaluate((el) => el.tagName).catch(() => '');
+              if (parentTag === 'LABEL') {
+                console.log(`Clicking parent label to select radio`);
+                await parent.click({ timeout: 15000 });
+                console.log(`✅ Selected payment option by clicking parent label`);
+                return `Successfully selected "${paymentMethodName}" payment option via parent label`;
+              }
+              
               const radioId = await radio.getAttribute('id').catch(() => '');
               if (radioId) {
                 // Try clicking label with for attribute
@@ -737,23 +792,22 @@ export function createPaymentTools(
                 const labelCount = await labelLocator.count();
                 if (labelCount > 0) {
                   await labelLocator.first().click({ timeout: 15000 });
-                  console.log(`Selected payment option by clicking label for hidden radio`);
+                  console.log(`✅ Selected payment option by clicking label for hidden radio`);
                   return `Successfully selected "${paymentMethodName}" payment option via label`;
                 }
                 
                 // Try clicking parent wrapper (span/div with role=radio)
-                const parent = radio.locator('..');
                 const parentRole = await parent.getAttribute('role').catch(() => '');
                 if (parentRole === 'radio') {
                   await parent.click({ timeout: 15000, force: true });
-                  console.log(`Selected payment option by clicking parent wrapper with role=radio`);
+                  console.log(`✅ Selected payment option by clicking parent wrapper with role=radio`);
                   return `Successfully selected "${paymentMethodName}" payment option via parent wrapper`;
                 }
               }
               
               // Try force clicking the hidden radio as last resort
               await radio.click({ timeout: 15000, force: true });
-              console.log(`Selected payment option using force click on hidden radio`);
+              console.log(`✅ Selected payment option using force click on hidden radio`);
               return `Successfully selected "${paymentMethodName}" payment option using force click`;
             }
           }
@@ -787,20 +841,28 @@ export function createPaymentTools(
           console.log(`Strategy 3 failed: ${e3}`);
         }
 
-        // Strategy 4: Try clicking on image with alt text or src matching payment method name
+        // Strategy 4: Try clicking on image with alt text, src, or data-bank matching payment method name
         // Handles variations: "Bill Desk" → "billdesk", "bill-desk", "bill_desk" in filenames
+        // Also handles BillDesk UPI apps: GooglePay → data-bank="CPI-DIRECT", class="pp-cpi"
         try {
           const nameNoSpaces = paymentMethodName.toLowerCase().replace(/\s+/g, '');
           const nameWithHyphens = paymentMethodName.toLowerCase().replace(/\s+/g, '-');
           const nameWithUnderscores = paymentMethodName.toLowerCase().replace(/\s+/g, '_');
           
+          console.log(`Strategy 4: Looking for image with keyword: ${nameNoSpaces}`);
+          
           const imgLocator = page.locator(
             `img[alt*="${paymentMethodName}" i], ` +
             `img[src*="${nameNoSpaces}" i], ` +
             `img[src*="${nameWithHyphens}" i], ` +
-            `img[src*="${nameWithUnderscores}" i]`
+            `img[src*="${nameWithUnderscores}" i], ` +
+            `img[data-bank*="${nameNoSpaces}" i], ` +  // BillDesk uses data-bank attribute
+            `img[class*="${nameNoSpaces}" i]`          // BillDesk uses class like "pp-cpi" for GooglePay
           );
           const count = await imgLocator.count();
+          
+          console.log(`Strategy 4: Found ${count} matching images`);
+          
           if (count > 0) {
             console.log(`Found image matching payment method: ${paymentMethodName}`);
             // Try to find associated radio button near the image
@@ -811,13 +873,19 @@ export function createPaymentTools(
             if (radioCount > 0) {
               const radio = radioInParent.first();
               const isVisible = await radio.isVisible().catch(() => false);
-              if (isVisible) {
+              
+              // Try clicking the parent label first (common pattern for UPI apps)
+              const labelParent = await parentLocator.evaluate((el) => el.tagName);
+              if (labelParent === 'LABEL') {
+                console.log(`Clicking label element to select radio`);
+                await parentLocator.click({ timeout: 15000 });
+              } else if (isVisible) {
                 await radio.click({ timeout: 15000 });
               } else {
                 // Radio is hidden, click parent or use force
                 await radio.click({ timeout: 15000, force: true });
               }
-              console.log(`Selected payment option by clicking radio near image`);
+              console.log(`✅ Selected payment option by clicking radio near image`);
               return `Successfully selected "${paymentMethodName}" payment option using image-based selector`;
             } else {
               // No radio in parent, check sibling containers (for structures like BSES where radio and image are siblings)
