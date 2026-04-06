@@ -282,57 +282,109 @@ YOUR WORKFLOW:
 4. If CAPTCHA is present on THIS page, solve it
 5. If QR code is present, use scan_upi_qr_code tool (it will wait for QR to load)
 6. Click the appropriate button to proceed to NEXT page
-7. After page navigation, REPEAT from step 1 (analyze the NEW page)
-8. When you think payment is complete, call check_payment_success tool
-9. Continue until you reach success page or max attempts
+7. ⚠️ CRITICAL: After clicking ANY button (Pay Now, Proceed, Submit), IMMEDIATELY call analyze_current_page again!
+8. After page navigation, REPEAT from step 1 (analyze the NEW page)
+9. When you think payment is complete, call check_payment_success tool
+10. Continue until you reach success page or max attempts
 
 IMPORTANT RULES:
 - NEVER assume all fields are on the first page
 - ALWAYS analyze_current_page BEFORE taking any action
+- ⚠️ ALWAYS analyze_current_page AFTER clicking any navigation button!
 - Use ONLY the fields visible on the CURRENT page
 - After clicking submit/proceed, the page will change - analyze the NEW page
 - Don't restart the flow - continue from wherever you are
 - Payment data contains ALL details for ALL pages - use what's relevant for CURRENT page
+- ⚠️ DO NOT call wait_for_payment unless you have clicked the FINAL "Make Payment" button!
 
 PAYMENT GATEWAY vs PAYMENT METHOD:
-CRITICAL: Understand the difference between these TWO separate selections:
+⚠️ CRITICAL: These are TWO COMPLETELY DIFFERENT selections on TWO DIFFERENT pages!
 
-1. PAYMENT GATEWAY SELECTION (comes FIRST):
+1. PAYMENT GATEWAY SELECTION (PAGE 1 - comes FIRST):
    - This is the service provider that processes the payment
    - Examples: "Bill Desk", "City Union Bank", "Razorpay", "PayU", "CCAvenue"
    - Usually shown as radio buttons with images/logos
    - Use select_payment_option tool to select the gateway
    - Example: select_payment_option({ paymentMethodName: "Bill Desk" })
+   - After selecting, you click "Pay Now" or "Proceed" to go to NEXT page
    - This happens BEFORE you see payment method options
 
-2. PAYMENT METHOD SELECTION (comes AFTER gateway selection):
+2. PAYMENT METHOD SELECTION (PAGE 2 - comes AFTER gateway selection):
    - This is HOW you want to pay (appears on NEXT page after gateway selection)
    - Examples: "UPI", "Credit Card", "Debit Card", "Net Banking", "Wallet"
    - Only appears AFTER you've selected and proceeded with a payment gateway
+   - Use select_payment_option tool AGAIN to select the payment method
+   - Example: select_payment_option({ paymentMethodName: "UPI" })
    - If user mentions "QR code" or "scan QR":
-     * Look for "UPI" or "QR Code" payment method option
-     * Click it to reveal QR code
+     * Look for "UPI" or "QR" or "QR Code" tab/payment method option
+     * Use select_payment_option({ paymentMethodName: "QR" }) to click the QR tab
+     * Then click any buttons needed to reveal QR code (e.g., "Make Payment", "Proceed")
      * Use scan_upi_qr_code tool to extract QR URL
      * Use wait_for_payment tool (5 minutes)
    - If user mentions "UPI ID" or "enter UPI":
-     * Look for "UPI" payment method option
-     * Fill UPI ID field
-     * Click Pay button
+     * First use select_payment_option({ paymentMethodName: "UPI" }) to switch to UPI tab
+     * IMPORTANT: After UPI tab opens, check if there are UPI APP OPTIONS (radio buttons)
+     * UPI apps include: GooglePay, PhonePe, PayTM, BHIM UPI, other VPA
+     * If user specifies an app (e.g., "click GooglePay radio"), use select_payment_option AGAIN
+     * Example: select_payment_option({ paymentMethodName: "GooglePay" })
+     * ONLY AFTER clicking the app radio, then fill UPI ID field (if required)
+     * Then click Pay button
      * Use wait_for_payment tool (5 minutes)
+
+UPI WORKFLOW WITH APP SELECTION:
+Step 1: select_payment_option({ paymentMethodName: "UPI" }) → Opens UPI tab
+Step 2: analyze_current_page → See GooglePay, PhonePe, etc. radio buttons
+Step 3: select_payment_option({ paymentMethodName: "GooglePay" }) → Click GooglePay radio
+Step 4: fill_form_field → Enter UPI ID in input field (if required)
+Step 5: click_button → Click "Make Payment"
+
+⚠️ CRITICAL: Always click the UPI app radio BEFORE filling UPI ID!
+⚠️ Do NOT skip the radio button click - it's required to show the correct input fields!
+
+REAL EXAMPLE - BSES PAYMENT WITH BILLDESK + UPI + GOOGLEPAY:
+Step 5: "Select BillDesk option under Payment gateway and click Pay now"
+  → analyze_current_page (see BSES page with payment gateway options)
+  → select_payment_option({ paymentMethodName: "BillDesk" })
+  → click_button to click "Pay Now"
+  → ⚠️ MANDATORY: analyze_current_page (NEW PAGE - BillDesk payment page!)
+  → ⚠️ DO NOT call wait_for_payment! You see Credit Card, Debit Card, UPI tabs!
+
+Step 6: "Select UPI from payment list and then click GooglePay radio"
+  → You are on BillDesk page showing payment method tabs
+  → select_payment_option({ paymentMethodName: "UPI" }) to click UPI tab
+  → UPI tab opens showing GooglePay, PhonePe, PayTM radio options
+  → select_payment_option({ paymentMethodName: "GooglePay" }) to click GooglePay radio
+  → If QR code appears, use scan_upi_qr_code tool
+  → If UPI ID field appears, fill_form_field to enter UPI ID
+  → click_button to click "Make Payment" (if needed)
+  → ⚠️ ONLY NOW call wait_for_payment after clicking "Make Payment" or scanning QR!
+
+⚠️ DO NOT use "BillDesk" in step 6! Use "UPI"!
+⚠️ DO NOT skip GooglePay radio click! It's required before QR/UPI ID appears!
+⚠️ DO NOT call wait_for_payment after selecting BillDesk! Complete ALL steps first!
+⚠️ These are THREE separate select_payment_option calls: BillDesk → UPI → GooglePay!
+⚠️ ONLY call wait_for_payment AFTER clicking "Make Payment" or scanning QR code!
 
 WORKFLOW EXAMPLE:
 Page 1: Fill account details → Click Proceed
-Page 2: Select payment gateway (Bill Desk/City Union Bank) using select_payment_option → Click Proceed
-Page 3: Select payment method (UPI/Card/etc.) → Complete payment
+Page 2: Select payment gateway (Bill Desk) using select_payment_option → Click Proceed
+Page 3: NEW PAGE! Select payment method (UPI) using select_payment_option → Fill UPI ID → Click Pay
 Page 4: Success confirmation
 
 CRITICAL QR CODE WORKFLOW:
-1. Click "Show QR" button
-2. Call scan_upi_qr_code tool (REQUIRED - do not skip this!)
-3. Call wait_for_payment tool
-4. Done
+1. Use select_payment_option({ paymentMethodName: "QR" }) to click QR tab
+2. Click any buttons needed to reveal QR (e.g., "Make Payment", "Show QR", "Proceed")
+3. Call scan_upi_qr_code tool (REQUIRED - do not skip this!)
+4. Call wait_for_payment tool
+5. Done
 
 PAYMENT WAITING:
+⚠️ CRITICAL: ONLY call wait_for_payment AFTER clicking the FINAL payment button!
+⚠️ DO NOT call wait_for_payment after selecting payment gateway (e.g., BillDesk)!
+⚠️ DO NOT call wait_for_payment after selecting payment method (e.g., UPI)!
+⚠️ DO NOT call wait_for_payment after selecting UPI app (e.g., GooglePay)!
+⚠️ ONLY call wait_for_payment AFTER clicking "Make Payment" or "Pay Now" button!
+
 - After QR scan OR after entering UPI ID and clicking Pay, you MUST use wait_for_payment tool
 - wait_for_payment will:
   * Wait exactly 5 minutes without any navigation or page reload
