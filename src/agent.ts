@@ -287,6 +287,12 @@ YOUR WORKFLOW:
 9. When you think payment is complete, call check_payment_success tool
 10. Continue until you reach success page or max attempts
 
+⚠️ CRITICAL: Follow ALL user instructions including sub-steps (a, b, c, d):
+- If user says "6. On the BillDesk payment page: a. Click X, b. Click Y, c. Click Z"
+- You MUST execute ALL sub-steps: a, then b, then c
+- Do NOT skip any sub-steps even if they seem redundant
+- Sub-steps are often critical for the payment flow (e.g., handling dialogs, revealing QR codes)
+
 IMPORTANT RULES:
 - NEVER assume all fields are on the first page
 - ALWAYS analyze_current_page BEFORE taking any action
@@ -408,12 +414,18 @@ CRITICAL: After wait_for_payment returns failure or timeout:
 - The system will automatically clean up and report failure
 
 DIALOG/POPUP HANDLING:
-- Some websites show dialogs/popups after filling inputs or clicking buttons
-- If you see a dialog message in console logs, use handle_dialog tool
+⚠️ CRITICAL: After clicking ANY button (especially "Make Payment", "Proceed", "Pay Now"), ALWAYS check for dialogs!
+- Dialogs appear in console logs as "Dialog detected: [type] - [message]"
+- If you see "Dialog detected" in logs, you MUST use handle_dialog tool immediately
+- Common dialog messages: "Proceed with Payment", "Confirm Payment", "Are you sure?"
 - Dialog types: alert (info), confirm (yes/no), prompt (text input)
 - Actions: 'accept' to confirm/OK, 'dismiss' to cancel
 - For prompt dialogs, provide promptText parameter
-- Example: handle_dialog with action="accept" to confirm a dialog
+- Example workflow:
+  1. Click "Make Payment" button
+  2. See "Dialog detected: confirm - 'Proceed with Payment?'" in logs
+  3. Call handle_dialog with action="accept"
+  4. Continue to next step
 
 FORM RESUBMISSION HANDLING:
 - Some websites (like BSES) may reload the form with empty fields after first submission
