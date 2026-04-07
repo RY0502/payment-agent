@@ -144,6 +144,50 @@ async function ensureInitialized(paymentData?: any) {
 const PAYMENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 const paymentStartTime = new Map<string, number>();
 
+/**
+ * Convert plain string message to JSON array format
+ * If already in array format, returns as-is
+ * If plain string with numbered steps, converts to array of strings
+ */
+function convertMessageToArrayFormat(message: string): string {
+  // Check if already in JSON array format (starts with [ or contains quotes and commas)
+  const trimmed = message.trim();
+  if (trimmed.startsWith('[') || (trimmed.includes('"') && trimmed.includes('","'))) {
+    return message;
+  }
+  
+  // Split by newlines to process line by line
+  const lines = message.split('\n');
+  const arrayItems: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue; // Skip empty lines
+    
+    // Check if this is a numbered step (e.g., "1.", "2.", "3.")
+    const numberedStepMatch = line.match(/^(\d+)\.\s+(.+)/);
+    if (numberedStepMatch) {
+      arrayItems.push(`"${numberedStepMatch[1]}. ${numberedStepMatch[2].replace(/"/g, '\\"')}"`);
+      continue;
+    }
+    
+    // Check if this is a sub-step (e.g., "a.", "b.", "c." or "-")
+    const subStepMatch = line.match(/^([a-z])\.\s+(.+)/);
+    const bulletMatch = line.match(/^-\s+(.+)/);
+    
+    if (subStepMatch) {
+      arrayItems.push(`"   ${subStepMatch[1]}. ${subStepMatch[2].replace(/"/g, '\\"')}"`);
+    } else if (bulletMatch) {
+      arrayItems.push(`"   - ${bulletMatch[1].replace(/"/g, '\\"')}"`);
+    } else {
+      // Regular line - add as-is
+      arrayItems.push(`"${line.replace(/"/g, '\\"')}"`);
+    }
+  }
+  
+  return `[${arrayItems.join(',\n ')}]`;
+}
+
 async function agentNode(state: PaymentState) {
   // STEP 1: Extract payment data and URL from user message if not already provided
   let paymentData = state.paymentData;
@@ -160,6 +204,7 @@ async function agentNode(state: PaymentState) {
     for (const msg of state.messages) {
       if (typeof msg === 'string') {
         // Direct string message
+        console.log("📝 Message type: string");
         messageContent = msg;
         break;
       } else if (msg && typeof msg === 'object') {
@@ -167,15 +212,31 @@ async function agentNode(state: PaymentState) {
         const constructorName = msg.constructor?.name;
         const role = (msg as any).role;
         
+        console.log("📝 Message type: object, constructor:", constructorName, "role:", role);
+        console.log("📝 Message content type:", typeof msg.content);
+        console.log("📝 Message content is array?:", Array.isArray(msg.content));
+        
         if (constructorName === 'HumanMessage' || role === 'user' || role === 'human') {
-          messageContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          // Handle array content (from LangGraph Studio)
+          if (Array.isArray(msg.content)) {
+            messageContent = msg.content.join('\n');
+            console.log("📝 Converted array content to string with newlines");
+          } else {
+            messageContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          }
           break;
         }
       }
     }
     
     if (messageContent && messageContent.trim()) {
-      console.log("🔍 User message content:", messageContent.substring(0, 200));
+      console.log("🔍 User message content (original, first 200 chars):", messageContent.substring(0, 200));
+      console.log("🔍 User message content (full length):", messageContent.length, "characters");
+      
+      // Convert plain string format to JSON array format if needed
+      const convertedMessage = convertMessageToArrayFormat(messageContent);
+      console.log("🔍 User message content (converted):", convertedMessage.substring(0, 200));
+      messageContent = convertedMessage;
       
       // Use LLM to extract structured data
       await ensureInitialized();
@@ -269,6 +330,16 @@ Payment Data: ${JSON.stringify(state.paymentData)}
 Target: ${state.targetUrl}
 Current Attempt: ${state.attemptCount + 1}/${state.maxAttempts}
 
+🚨 CRITICAL INSTRUCTION - READ THIS FIRST:
+The user message contains NUMBERED STEPS (1., 2., 3...) and SUB-STEPS (a., b., c...).
+You MUST execute EVERY step in EXACT ORDER. Do NOT skip ANY steps, especially sub-steps.
+
+Example: If user says "6. On the BillDesk payment page: a. Click QR tab, b. Click Make Payment, c. Click Proceed, d. Click Show QR"
+You MUST do: Step 6a → Step 6b → Step 6c → Step 6d (ALL FOUR in order)
+Do NOT do: Step 6a → scan QR (WRONG - you skipped 6b, 6c, 6d!)
+
+Do NOT jump ahead. Do NOT assume steps. Do NOT skip sub-steps. Follow EXACTLY as written.
+
 CRITICAL: This is a MULTI-PAGE flow. You will navigate through multiple pages:
 - Page 1: Initial details (account number, etc.)
 - Page 2: Additional details or verification (CAPTCHA, amount, etc.)
@@ -286,12 +357,6 @@ YOUR WORKFLOW:
 8. After page navigation, REPEAT from step 1 (analyze the NEW page)
 9. When you think payment is complete, call check_payment_success tool
 10. Continue until you reach success page or max attempts
-
-⚠️ CRITICAL: Follow ALL user instructions including sub-steps (a, b, c, d):
-- If user says "6. On the BillDesk payment page: a. Click X, b. Click Y, c. Click Z"
-- You MUST execute ALL sub-steps: a, then b, then c
-- Do NOT skip any sub-steps even if they seem redundant
-- Sub-steps are often critical for the payment flow (e.g., handling dialogs, revealing QR codes)
 
 IMPORTANT RULES:
 - NEVER assume all fields are on the first page
@@ -324,8 +389,9 @@ PAYMENT GATEWAY vs PAYMENT METHOD:
    - If user mentions "QR code" or "scan QR":
      * Look for "UPI" or "QR" or "QR Code" tab/payment method option
      * Use select_payment_option({ paymentMethodName: "QR" }) to click the QR tab
-     * Then click any buttons needed to reveal QR code (e.g., "Make Payment", "Proceed")
-     * Use scan_upi_qr_code tool to extract QR URL
+     * ⚠️ CRITICAL: QR is NOT visible yet! You MUST click buttons to reveal it!
+     * Click "Make Payment" button → Click "Proceed" on dialog → Click "Show QR" button
+     * ONLY AFTER clicking all buttons, use scan_upi_qr_code tool to extract QR URL
      * Use wait_for_payment tool (5 minutes)
    - If user mentions "UPI ID" or "enter UPI":
      * First use select_payment_option({ paymentMethodName: "UPI" }) to switch to UPI tab
@@ -378,11 +444,21 @@ Page 3: NEW PAGE! Select payment method (UPI) using select_payment_option → Fi
 Page 4: Success confirmation
 
 CRITICAL QR CODE WORKFLOW:
+⚠️ IMPORTANT: QR code is NOT visible immediately after clicking QR tab!
+⚠️ You MUST click buttons in sequence to reveal the QR code!
+
+Step-by-step QR workflow:
 1. Use select_payment_option({ paymentMethodName: "QR" }) to click QR tab
-2. Click any buttons needed to reveal QR (e.g., "Make Payment", "Show QR", "Proceed")
-3. Call scan_upi_qr_code tool (REQUIRED - do not skip this!)
-4. Call wait_for_payment tool
-5. Done
+2. ⚠️ MANDATORY: Call analyze_current_page to see what buttons are available
+3. ⚠️ MANDATORY: Click "Make Payment" button using click_button tool
+4. ⚠️ MANDATORY: If dialog appears, click "Proceed with Payment" using click_button tool
+5. ⚠️ MANDATORY: Click "Click here to scan" or "Show QR" button using click_button tool
+6. NOW the QR code is visible - call scan_upi_qr_code tool
+7. Call wait_for_payment tool
+8. Done
+
+⚠️ DO NOT call scan_upi_qr_code immediately after clicking QR tab!
+⚠️ DO NOT skip the button clicks - they are REQUIRED to show the QR code!
 
 PAYMENT WAITING:
 ⚠️ CRITICAL: ONLY call wait_for_payment AFTER clicking the FINAL payment button!
@@ -414,18 +490,12 @@ CRITICAL: After wait_for_payment returns failure or timeout:
 - The system will automatically clean up and report failure
 
 DIALOG/POPUP HANDLING:
-⚠️ CRITICAL: After clicking ANY button (especially "Make Payment", "Proceed", "Pay Now"), ALWAYS check for dialogs!
-- Dialogs appear in console logs as "Dialog detected: [type] - [message]"
-- If you see "Dialog detected" in logs, you MUST use handle_dialog tool immediately
-- Common dialog messages: "Proceed with Payment", "Confirm Payment", "Are you sure?"
+- Some websites show dialogs/popups after filling inputs or clicking buttons
+- If you see a dialog message in console logs, use handle_dialog tool
 - Dialog types: alert (info), confirm (yes/no), prompt (text input)
 - Actions: 'accept' to confirm/OK, 'dismiss' to cancel
 - For prompt dialogs, provide promptText parameter
-- Example workflow:
-  1. Click "Make Payment" button
-  2. See "Dialog detected: confirm - 'Proceed with Payment?'" in logs
-  3. Call handle_dialog with action="accept"
-  4. Continue to next step
+- Example: handle_dialog with action="accept" to confirm a dialog
 
 FORM RESUBMISSION HANDLING:
 - Some websites (like BSES) may reload the form with empty fields after first submission
@@ -446,9 +516,23 @@ Page 4: See "Payment Successful" → Done
 
 Use tools to interact with the page. Adapt to what you see on each page.`;
 
+  // Normalize messages for Groq - convert array content to strings
+  const normalizedMessages = state.messages.map(msg => {
+    if (msg && typeof msg === 'object' && 'content' in msg) {
+      // If content is an array, join it with newlines
+      if (Array.isArray(msg.content)) {
+        return {
+          ...msg,
+          content: msg.content.join('\n')
+        };
+      }
+    }
+    return msg;
+  });
+
   const messages = [
     new SystemMessage(systemPrompt),
-    ...state.messages,
+    ...normalizedMessages,
   ];
 
   const llmWithTools = llm!.bindTools(tools);
