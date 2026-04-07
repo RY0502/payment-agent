@@ -1194,7 +1194,7 @@ export function createPaymentTools(
     },
     {
       name: "scan_upi_qr_code",
-      description: "Extract QR code image URL from payment page. Only use if user mentions QR code/scanner in prompt.",
+      description: "Extract QR code image URL from payment page. CRITICAL: Only use AFTER clicking all required buttons (Make Payment, Proceed, Show QR). QR code is NOT visible immediately after clicking QR tab - you must click buttons first to reveal it. Check user prompt for button click steps before using this tool.",
       schema: z.object({}),
     }
   );
