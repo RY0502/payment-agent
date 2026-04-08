@@ -78,14 +78,15 @@ export function createPaymentTools(
           return `Failed to fill field: Browser page not available`;
         }
 
-        // Wait for page to be ready
-        await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+        console.log(`🔍 Looking for field: "${fieldDescription}" to fill with value: "${value}"`);
 
         // Strategy 1: Try exact placeholder match first (most reliable)
         try {
           await page.getByPlaceholder(fieldDescription, { exact: false }).fill(value, { timeout: 3000 });
+          console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder`);
           return `Successfully filled "${fieldDescription}" using exact placeholder`;
         } catch (e1) {
+          console.log(`❌ Strategy 1 (placeholder) failed`);
           // Continue to next strategy
         }
 
@@ -94,8 +95,10 @@ export function createPaymentTools(
           const keywords = fieldDescription.toLowerCase().split(' ');
           const regexPattern = keywords.join('.*');
           await page.getByPlaceholder(new RegExp(regexPattern, 'i')).fill(value, { timeout: 3000 });
+          console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder regex`);
           return `Successfully filled "${fieldDescription}" using placeholder regex`;
         } catch (e2) {
+          console.log(`❌ Strategy 2 (placeholder regex) failed`);
           // Continue to next strategy
         }
 
@@ -104,8 +107,10 @@ export function createPaymentTools(
           const keywords = fieldDescription.toLowerCase().split(' ');
           const regexPattern = keywords.join('.*');
           await page.getByLabel(new RegExp(regexPattern, 'i')).fill(value, { timeout: 3000 });
+          console.log(`✅ Filled "${fieldDescription}" = "${value}" using label`);
           return `Successfully filled "${fieldDescription}" using label`;
         } catch (e3) {
+          console.log(`❌ Strategy 3 (label) failed`);
           // Continue to next strategy
         }
 
@@ -211,27 +216,46 @@ export function createPaymentTools(
         try {
           const keywords = buttonDescription.toLowerCase().split(' ');
           const regexPattern = keywords.join('.*');
-          await page.getByRole('button', { name: new RegExp(regexPattern, 'i') }).click({ timeout: 3000 });
-          try {
-            await browser.waitForNavigation();
-          } catch (navError) {
-            // Navigation wait failed, but click succeeded
+          console.log(`🔍 Strategy 1: Looking for button with pattern: ${regexPattern}`);
+          const buttonLocator = page.getByRole('button', { name: new RegExp(regexPattern, 'i') });
+          const count = await buttonLocator.count();
+          console.log(`Found ${count} button(s) matching pattern`);
+          
+          if (count > 0) {
+            // If multiple matches, click the first visible one
+            await buttonLocator.first().click({ timeout: 3000 });
+            console.log(`✅ Clicked button matching "${buttonDescription}" using role locator`);
+            try {
+              await browser.waitForNavigation();
+            } catch (navError) {
+              // Navigation wait failed, but click succeeded
+            }
+            return `Successfully clicked "${buttonDescription}" button`;
           }
-          return `Successfully clicked "${buttonDescription}" button`;
         } catch (e1) {
+          console.log(`❌ Strategy 1 failed: ${e1}`);
           // Continue to next strategy
         }
 
         // Strategy 1b: Try with text locator
         try {
-          await page.locator(`text=${buttonDescription}`).click({ timeout: 3000 });
-          try {
-            await browser.waitForNavigation();
-          } catch (navError) {
-            // Navigation wait failed, but click succeeded
+          console.log(`🔍 Strategy 1b: Looking for button with text: ${buttonDescription}`);
+          const textLocator = page.locator(`text=${buttonDescription}`);
+          const count = await textLocator.count();
+          console.log(`Found ${count} element(s) with text`);
+          
+          if (count > 0) {
+            await textLocator.first().click({ timeout: 3000 });
+            console.log(`✅ Clicked button matching "${buttonDescription}" using text locator`);
+            try {
+              await browser.waitForNavigation();
+            } catch (navError) {
+              // Navigation wait failed, but click succeeded
+            }
+            return `Successfully clicked "${buttonDescription}" using text locator`;
           }
-          return `Successfully clicked "${buttonDescription}" using text locator`;
         } catch (e1b) {
+          console.log(`❌ Strategy 1b failed: ${e1b}`);
           // Continue to next strategy
         }
 
@@ -699,21 +723,27 @@ export function createPaymentTools(
 
         console.log(`Attempting to select payment option: ${paymentMethodName}`);
 
-        // Strategy 0A: Try clicking tab/link elements (for BillDesk-style tabbed payment methods)
-        // Handles structures like: <li><a data-value="..." href="#tab16"><i class="bdi bdi-upi"></i><span>&nbsp;</span></a></li>
+        // Strategy 0A: Try clicking on tab/link/button/div elements (for BillDesk tabs, Jio buttons, etc.)
         try {
           const keywords = paymentMethodName.toLowerCase().replace(/\s+/g, '');
           
-          console.log(`Strategy 0A: Looking for tab/link with keyword: ${keywords}`);
+          console.log(`Strategy 0A: Looking for tab/link/button with keyword: ${keywords}`);
           
-          // Try finding link/anchor with data-value, href, or icon class containing payment method name
-          // Note: BillDesk uses data-value="txtBankIDUPI-CPH" and icon class "bdi bdi-upi"
+          // Try finding elements with payment method name in various formats
+          // Covers: BillDesk <a> tabs, Jio <div> buttons, generic <button> elements
           const tabLocator = page.locator(
+            // Anchor tags (BillDesk style)
             `a[data-value*="${keywords}" i], ` +
             `a[href*="${keywords}" i], ` +
-            `a:has(i[class*="${keywords}" i]), ` +  // Matches <i class="bdi bdi-upi">
+            `a:has(i[class*="${keywords}" i]), ` +
             `a:has(.bdi-${keywords}), ` +
-            `li:has-text("${paymentMethodName}") > a`
+            `li:has-text("${paymentMethodName}") > a, ` +
+            // Div/Button elements with text (Jio style)
+            `div:has-text("${paymentMethodName}"), ` +
+            `button:has-text("${paymentMethodName}"), ` +
+            // Elements with "Pay via QR", "QR Code", etc.
+            `div:has-text("Pay via ${paymentMethodName}"), ` +
+            `button:has-text("Pay via ${paymentMethodName}")`
           );
           const count = await tabLocator.count();
           
@@ -1090,9 +1120,43 @@ export function createPaymentTools(
 
         console.log('Extracting QR code image URL from page...');
 
-        // Extract QR code image URL
+        // Extract QR code image URL (handles both <img> and <svg> elements)
         const qrImageUrl = await page.evaluate(() => {
-          // Try to find QR code image - simple approach
+          // Helper function to convert SVG to data URL
+          const svgToDataUrl = (svg: SVGSVGElement): string => {
+            const serializer = new XMLSerializer();
+            const svgString = serializer.serializeToString(svg);
+            return 'data:image/svg+xml;base64,' + btoa(svgString);
+          };
+
+          // First, try to find SVG QR codes (like Jio)
+          const allSvgs = Array.from(document.querySelectorAll('svg'));
+          for (const svg of allSvgs) {
+            const width = svg.getAttribute('width') || svg.clientWidth;
+            const height = svg.getAttribute('height') || svg.clientHeight;
+            
+            // QR codes are typically square and reasonably sized
+            const numWidth = typeof width === 'string' ? parseInt(width) : width;
+            const numHeight = typeof height === 'string' ? parseInt(height) : height;
+            
+            if (numWidth < 100 || numHeight < 100) continue;
+            
+            // Check if parent or nearby elements mention QR
+            const parentText = svg.parentElement?.textContent?.toLowerCase() || '';
+            const parentClass = svg.parentElement?.className?.toLowerCase() || '';
+            const hasQrContext = parentText.includes('qr') || parentText.includes('scan') || parentClass.includes('qr');
+            
+            // SVG QR codes typically have many path elements (for the QR pattern)
+            const pathCount = svg.querySelectorAll('path').length;
+            const looksLikeQr = pathCount > 10; // QR codes have many paths
+            
+            if (hasQrContext && looksLikeQr) {
+              console.log('SVG QR code found with', pathCount, 'paths');
+              return svgToDataUrl(svg);
+            }
+          }
+
+          // Fallback: Try to find IMG QR codes
           const allImages = Array.from(document.querySelectorAll('img'));
           
           for (const img of allImages) {
@@ -1118,7 +1182,7 @@ export function createPaymentTools(
             const parentHasQr = img.parentElement?.className?.toLowerCase().includes('qr');
             
             if (hasQrInTestId || hasQrInAlt || hasQrInSrc || hasQrInClass || parentHasQr) {
-              console.log('QR image found:', src.substring(0, 50));
+              console.log('IMG QR code found:', src.substring(0, 50));
               return img.src;
             }
           }
