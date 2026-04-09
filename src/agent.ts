@@ -346,11 +346,6 @@ Example: If user says "6. On the BillDesk payment page: a. Click QR tab, b. Clic
 You MUST do: Step 6a → Step 6b → Step 6c → Step 6d (ALL FOUR in order)
 Do NOT do: Step 6a → scan QR (WRONG - you skipped 6b, 6c, 6d!)
 
-🚨 WHEN TO CALL wait_for_payment:
-ONLY call wait_for_payment when the user's numbered steps explicitly say "Wait for X mins for payment"!
-Do NOT call it just because you clicked a button called "Pay", "Continue", or "Proceed"!
-Look for the step that says "Wait for 5 mins" - that's when you call wait_for_payment!
-
 Do NOT jump ahead. Do NOT assume steps. Do NOT skip sub-steps. Follow EXACTLY as written.
 
 CRITICAL: This is a MULTI-PAGE flow. You will navigate through multiple pages:
