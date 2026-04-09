@@ -259,6 +259,50 @@ export function createPaymentTools(
           // Continue to next strategy
         }
 
+        // Strategy 1c: Try finding any clickable element with text (generic approach for divs, buttons, spans, etc.)
+        try {
+          console.log(`🔍 Strategy 1c: Looking for any clickable element with text: ${buttonDescription}`);
+          // Look for any element that contains the text
+          const clickableLocator = page.locator(`*:has-text("${buttonDescription}")`).first();
+          const count = await clickableLocator.count();
+          console.log(`Found ${count} element(s) with text`);
+          
+          if (count > 0) {
+            // Find the outermost clickable parent (could be button, div, a, span, etc.)
+            const element = clickableLocator.first();
+            // Try to find parent with click handler or cursor pointer
+            const clickableParent = await element.evaluateHandle((el) => {
+              let current = el;
+              // Walk up the DOM tree to find a clickable parent
+              while (current && current !== document.body) {
+                const style = window.getComputedStyle(current);
+                const hasClickHandler = current.onclick !== null;
+                const isClickable = style.cursor === 'pointer' || hasClickHandler;
+                const isButton = current.tagName === 'BUTTON' || current.tagName === 'A';
+                
+                // Prefer buttons/links, or elements with click indicators
+                if (isButton || isClickable) {
+                  return current;
+                }
+                current = current.parentElement as HTMLElement;
+              }
+              return el; // Return original element if no clickable parent found
+            });
+            
+            await clickableParent.asElement()?.click({ timeout: 3000 });
+            console.log(`✅ Clicked element matching "${buttonDescription}"`);
+            try {
+              await browser.waitForNavigation();
+            } catch (navError) {
+              // Navigation wait failed, but click succeeded
+            }
+            return `Successfully clicked "${buttonDescription}" using generic clickable element`;
+          }
+        } catch (e1c) {
+          console.log(`❌ Strategy 1c failed: ${e1c}`);
+          // Continue to next strategy
+        }
+
         // Strategy 2: Try finding exact match from accessibility tree
         try {
           const tree = JSON.parse(await browser.getAccessibilityTree());
@@ -1146,12 +1190,28 @@ export function createPaymentTools(
             const parentClass = svg.parentElement?.className?.toLowerCase() || '';
             const hasQrContext = parentText.includes('qr') || parentText.includes('scan') || parentClass.includes('qr');
             
-            // SVG QR codes typically have many path elements (for the QR pattern)
-            const pathCount = svg.querySelectorAll('path').length;
-            const looksLikeQr = pathCount > 10; // QR codes have many paths
+            // SVG QR codes can have either:
+            // 1. Many path elements (multiple small paths)
+            // 2. Few paths but with complex d attributes (single large path with many coordinates)
+            const paths = svg.querySelectorAll('path');
+            const pathCount = paths.length;
+            
+            // Check if any path has a complex d attribute (QR pattern)
+            let hasComplexPath = false;
+            for (const path of Array.from(paths)) {
+              const d = path.getAttribute('d') || '';
+              // QR codes have many M (moveto) commands in the path
+              const movetoCount = (d.match(/M /g) || []).length;
+              if (movetoCount > 20) {
+                hasComplexPath = true;
+                break;
+              }
+            }
+            
+            const looksLikeQr = pathCount > 10 || (pathCount >= 1 && hasComplexPath);
             
             if (hasQrContext && looksLikeQr) {
-              console.log('SVG QR code found with', pathCount, 'paths');
+              console.log(`SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
               return svgToDataUrl(svg);
             }
           }
