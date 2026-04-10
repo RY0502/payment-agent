@@ -452,10 +452,19 @@ Page 3: NEW PAGE! Select payment method (UPI) using select_payment_option → Fi
 Page 4: Success confirmation
 
 CRITICAL QR CODE WORKFLOW:
-⚠️ IMPORTANT: QR code is NOT visible immediately after clicking QR tab!
-⚠️ You MUST click buttons in sequence to reveal the QR code!
+⚠️ There are TWO types of QR flows - follow the correct one!
 
-Step-by-step QR workflow:
+TYPE 1: Simple QR Flow (e.g., Jio, direct QR button):
+1. Call analyze_current_page to see available payment options
+2. Click "Pay via QR" or similar button using click_button tool
+3. ⚠️ IMMEDIATELY call scan_upi_qr_code tool - QR appears right away!
+4. ⚠️ ONLY AFTER scan_upi_qr_code succeeds, call wait_for_payment tool
+5. Done
+
+⚠️ CRITICAL: DO NOT call scan_upi_qr_code without clicking the QR button first!
+⚠️ CRITICAL: DO NOT call wait_for_payment without calling scan_upi_qr_code first!
+
+TYPE 2: Complex QR Flow (e.g., BillDesk with multiple steps):
 1. Use select_payment_option({ paymentMethodName: "QR" }) to click QR tab
 2. ⚠️ MANDATORY: Call analyze_current_page to see what buttons are available
 3. ⚠️ MANDATORY: Click "Make Payment" button using click_button tool
@@ -465,17 +474,25 @@ Step-by-step QR workflow:
 7. Call wait_for_payment tool
 8. Done
 
-⚠️ DO NOT call scan_upi_qr_code immediately after clicking QR tab!
-⚠️ DO NOT skip the button clicks - they are REQUIRED to show the QR code!
+⚠️ HOW TO KNOW WHICH TYPE:
+- If user steps say "Click Pay via QR button" → Use TYPE 1 (simple flow)
+- If user steps say "Select QR payment option" → Use TYPE 2 (complex flow)
+- If you clicked a button and see QR code text/context → Call scan_upi_qr_code immediately!
+- If you clicked QR tab but no QR visible → Follow TYPE 2 workflow
 
 PAYMENT WAITING:
-⚠️ CRITICAL: ONLY call wait_for_payment AFTER clicking the FINAL payment button!
-⚠️ DO NOT call wait_for_payment after selecting payment gateway (e.g., BillDesk)!
-⚠️ DO NOT call wait_for_payment after selecting payment method (e.g., UPI)!
-⚠️ DO NOT call wait_for_payment after selecting UPI app (e.g., GooglePay)!
-⚠️ ONLY call wait_for_payment AFTER clicking "Make Payment" or "Pay Now" button!
+⚠️ CRITICAL: ONLY call wait_for_payment in these EXACT scenarios:
+1. FOR QR PAYMENTS: After calling scan_upi_qr_code tool successfully
+2. FOR UPI ID PAYMENTS: After entering UPI ID and clicking final Pay button
 
-- After QR scan OR after entering UPI ID and clicking Pay, you MUST use wait_for_payment tool
+⚠️ DO NOT call wait_for_payment:
+- After clicking "Pay via QR" button (you must call scan_upi_qr_code first!)
+- After selecting payment gateway (e.g., BillDesk)
+- After selecting payment method (e.g., UPI, QR)
+- After selecting UPI app (e.g., GooglePay)
+- Before calling scan_upi_qr_code for QR payments
+
+- After QR scan (scan_upi_qr_code) OR after entering UPI ID and clicking Pay, you MUST use wait_for_payment tool
 - wait_for_payment will:
   * Wait exactly 5 minutes without any navigation or page reload
   * Stay on the current page (page will automatically redirect to success if payment completes)
