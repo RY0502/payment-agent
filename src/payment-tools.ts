@@ -227,8 +227,11 @@ export function createPaymentTools(
             console.log(`✅ Clicked button matching "${buttonDescription}" using role locator`);
             try {
               await browser.waitForNavigation();
+              // Wait additional time for dynamic content to load
+              await page.waitForTimeout(2000);
             } catch (navError) {
-              // Navigation wait failed, but click succeeded
+              // Navigation wait failed, but click succeeded - still wait for dynamic content
+              await page.waitForTimeout(2000);
             }
             return `Successfully clicked "${buttonDescription}" button`;
           }
@@ -262,8 +265,8 @@ export function createPaymentTools(
         // Strategy 1c: Try finding any clickable element with text (generic approach for divs, buttons, spans, etc.)
         try {
           console.log(`🔍 Strategy 1c: Looking for any clickable element with text: ${buttonDescription}`);
-          // Look for any element that contains the text
-          const clickableLocator = page.locator(`*:has-text("${buttonDescription}")`).first();
+          // Look for any element that contains the text (case-insensitive)
+          const clickableLocator = page.locator(`text=/${buttonDescription}/i`).first();
           const count = await clickableLocator.count();
           console.log(`Found ${count} element(s) with text`);
           
@@ -1162,19 +1165,30 @@ export function createPaymentTools(
           return "No active page found. Please navigate to a payment page first.";
         }
 
-        console.log('Extracting QR code image URL from page...');
+        console.log('🔍 Extracting QR code image URL from page...');
+        
+        // Wait for loading spinner to disappear (QR page loads dynamically)
+        console.log('⏳ Waiting for page to finish loading...');
+        try {
+          await page.waitForSelector('[data-testid="central-loader"]', { state: 'hidden', timeout: 15000 });
+          console.log('✅ Loading spinner disappeared');
+        } catch (e) {
+          console.log('⚠️ Loading spinner timeout or not found, proceeding anyway...');
+        }
+        
+        // Wait additional time for QR code to render
+        console.log('⏳ Waiting 3 more seconds for QR code to render...');
+        await page.waitForTimeout(3000);
 
         // Extract QR code image URL (handles both <img> and <svg> elements)
         const qrImageUrl = await page.evaluate(() => {
-          // Helper function to convert SVG to data URL
-          const svgToDataUrl = (svg: SVGSVGElement): string => {
-            const serializer = new XMLSerializer();
-            const svgString = serializer.serializeToString(svg);
-            return 'data:image/svg+xml;base64,' + btoa(svgString);
-          };
-
-          // First, try to find SVG QR codes (like Jio)
-          const allSvgs = Array.from(document.querySelectorAll('svg'));
+          try {
+            console.log('🔍 [Browser] Starting QR code detection...');
+            
+            // First, try to find SVG QR codes (like Jio)
+            console.log('🔍 [Browser] Searching for SVG elements...');
+            const allSvgs = Array.from(document.querySelectorAll('svg'));
+            console.log(`🔍 [Browser] Found ${allSvgs.length} SVG elements`);
           for (const svg of allSvgs) {
             const width = svg.getAttribute('width') || svg.clientWidth;
             const height = svg.getAttribute('height') || svg.clientHeight;
@@ -1212,7 +1226,15 @@ export function createPaymentTools(
             
             if (hasQrContext && looksLikeQr) {
               console.log(`SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
-              return svgToDataUrl(svg);
+              // Inline SVG to data URL conversion
+              try {
+                const serializer = new XMLSerializer();
+                const svgString = serializer.serializeToString(svg);
+                return 'data:image/svg+xml;base64,' + btoa(svgString);
+              } catch (e) {
+                console.log(`❌ [Browser] Error converting SVG: ${e}`);
+                continue;
+              }
             }
           }
 
@@ -1247,14 +1269,23 @@ export function createPaymentTools(
             }
           }
           
+          console.log('🔍 [Browser] No QR code found');
           return null;
+          
+          } catch (error) {
+            console.log(`❌ [Browser] Fatal error in QR detection: ${error}`);
+            return null;
+          }
         });
 
+        console.log('📊 QR extraction result:', qrImageUrl ? `Found (${qrImageUrl.substring(0, 50)}...)` : 'Not found');
+
         if (!qrImageUrl) {
+          console.log('❌ No QR code found on page');
           return "No UPI QR code found on the current page. The QR code may still be loading or not present.";
         }
 
-        console.log('✅ QR code image URL extracted:', qrImageUrl);
+        console.log('✅ QR code image URL extracted:', qrImageUrl.substring(0, 100) + '...');
 
         // Send QR URL to user's phone via HTTP POST to Supabase function
         const notificationUrl = process.env.PAYMENT_NOTIFICATION_URL;
