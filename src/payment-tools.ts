@@ -1154,56 +1154,67 @@ export function createPaymentTools(
   );
 
   const scanUpiQrCode = tool(
-  async ({}) => {
-    if (!browser) {
-      throw new Error("Browser not initialized");
-    }
-
-    try {
-      const page = await browser.getPage();
-      if (!page) {
-        return "No active page found. Please navigate to a payment page first.";
+    async ({}) => {
+      if (!browser) {
+        throw new Error("Browser not initialized");
       }
 
-      console.log('🔍 Extracting QR code image URL from page...');
-      
       try {
-        await page.waitForSelector('[data-testid="central-loader"]', { state: 'hidden', timeout: 15000 });
-        console.log('✅ Loading spinner disappeared');
-      } catch (e) {
-        console.log('⚠️ Loading spinner timeout or not found, proceeding anyway...');
-      }
-      
-      console.log('⏳ Waiting 3 more seconds for QR code to render...');
-      await page.waitForTimeout(3000);
+        const page = await browser.getPage();
+        if (!page) {
+          return "No active page found. Please navigate to a payment page first.";
+        }
 
-      const qrImageUrl = await page.evaluate(async () => {
+        console.log('🔍 Extracting QR code image URL from page...');
+        
+        // Wait for loading spinner to disappear (QR page loads dynamically)
+        console.log('⏳ Waiting for page to finish loading...');
         try {
-          console.log('🔍 [Browser] Starting QR code detection...');
-          
-          console.log('🔍 [Browser] Searching for SVG elements...');
-          const allSvgs = Array.from(document.querySelectorAll('svg'));
-          console.log(`🔍 [Browser] Found ${allSvgs.length} SVG elements`);
-          
+          await page.waitForSelector('[data-testid="central-loader"]', { state: 'hidden', timeout: 15000 });
+          console.log('✅ Loading spinner disappeared');
+        } catch (e) {
+          console.log('⚠️ Loading spinner timeout or not found, proceeding anyway...');
+        }
+        
+        // Wait additional time for QR code to render
+        console.log('⏳ Waiting 3 more seconds for QR code to render...');
+        await page.waitForTimeout(3000);
+
+        // Extract QR code image URL (handles both <img> and <svg> elements)
+        const qrImageUrl = await page.evaluate(() => {
+          try {
+            console.log('🔍 [Browser] Starting QR code detection...');
+            
+            // First, try to find SVG QR codes (like Jio)
+            console.log('🔍 [Browser] Searching for SVG elements...');
+            const allSvgs = Array.from(document.querySelectorAll('svg'));
+            console.log(`🔍 [Browser] Found ${allSvgs.length} SVG elements`);
           for (const svg of allSvgs) {
             const width = svg.getAttribute('width') || svg.clientWidth;
             const height = svg.getAttribute('height') || svg.clientHeight;
             
+            // QR codes are typically square and reasonably sized
             const numWidth = typeof width === 'string' ? parseInt(width) : width;
             const numHeight = typeof height === 'string' ? parseInt(height) : height;
             
             if (numWidth < 100 || numHeight < 100) continue;
             
+            // Check if parent or nearby elements mention QR
             const parentText = svg.parentElement?.textContent?.toLowerCase() || '';
             const parentClass = svg.parentElement?.className?.toLowerCase() || '';
             const hasQrContext = parentText.includes('qr') || parentText.includes('scan') || parentClass.includes('qr');
             
+            // SVG QR codes can have either:
+            // 1. Many path elements (multiple small paths)
+            // 2. Few paths but with complex d attributes (single large path with many coordinates)
             const paths = svg.querySelectorAll('path');
             const pathCount = paths.length;
             
+            // Check if any path has a complex d attribute (QR pattern)
             let hasComplexPath = false;
             for (const path of Array.from(paths)) {
               const d = path.getAttribute('d') || '';
+              // QR codes have many M (moveto) commands in the path
               const movetoCount = (d.match(/M /g) || []).length;
               if (movetoCount > 20) {
                 hasComplexPath = true;
@@ -1214,83 +1225,24 @@ export function createPaymentTools(
             const looksLikeQr = pathCount > 10 || (pathCount >= 1 && hasComplexPath);
             
             if (hasQrContext && looksLikeQr) {
-              console.log(`SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
-              
-              // CRITICAL FIX: Convert SVG to PNG canvas to preserve all details accurately
+              console.log(`✅ [Browser] SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
+              // Inline SVG to data URL conversion using URL encoding to prevent data corruption
               try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                if (!ctx) throw new Error('Could not get canvas context');
-                
-                // Set canvas dimensions with 2x scaling for better quality
-                const scale = 2;
-                canvas.width = numWidth * scale;
-                canvas.height = numHeight * scale;
-                
-                // Set background to white (standard for QR codes)
-                ctx.fillStyle = 'white';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                // Scale context
-                ctx.scale(scale, scale);
-                
-                // Serialize SVG with all attributes preserved
                 const serializer = new XMLSerializer();
-                let svgString = serializer.serializeToString(svg);
+                const svgString = serializer.serializeToString(svg);
+                console.log(`📊 [Browser] Original SVG size: ${svgString.length} characters`);
                 
-                // Ensure SVG has proper viewBox for scaling
-                if (!svg.getAttribute('viewBox')) {
-                  const viewBox = `0 0 ${numWidth} ${numHeight}`;
-                  svgString = svgString.replace('<svg', `<svg viewBox="${viewBox}"`);
-                }
-                
-                const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-                const svgUrl = URL.createObjectURL(blob);
-                
-                // Create image and wait for load
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                
-                const loadPromise = new Promise<void>((resolve, reject) => {
-                  const timeout = setTimeout(() => {
-                    reject(new Error('SVG image load timeout'));
-                  }, 10000);
-                  
-                  img.onload = () => {
-                    clearTimeout(timeout);
-                    resolve();
-                  };
-                  img.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(new Error('Failed to load SVG'));
-                  };
-                  img.src = svgUrl;
-                });
-                
-                await loadPromise;
-                
-                // Draw image to canvas
-                ctx.drawImage(img, 0, 0, numWidth, numHeight);
-                URL.revokeObjectURL(svgUrl);
-                
-                // Convert to PNG base64 for accurate data transmission
-                const pngDataUrl = canvas.toDataURL('image/png', 1.0);
-                console.log('✅ SVG successfully converted to PNG (no data loss)');
-                return pngDataUrl;
-              } catch (canvasError) {
-                console.error(`❌ Canvas conversion failed: ${canvasError}`);
-                // Fallback: Use blob URL (still better than corrupted base64)
-                try {
-                  const serializer = new XMLSerializer();
-                  const svgString = serializer.serializeToString(svg);
-                  const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-                  const blobUrl = URL.createObjectURL(blob);
-                  console.log('ℹ️ Using Blob URL instead (preserves SVG accuracy)');
-                  return blobUrl;
-                } catch (blobError) {
-                  console.error(`Failed to create blob: ${blobError}`);
-                  continue;
-                }
+                // Use URL encoding instead of base64 to preserve exact data (critical for financial QR codes)
+                const encodedSvg = encodeURIComponent(svgString)
+                  .replace(/'/g, '%27')
+                  .replace(/"/g, '%22');
+                const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodedSvg;
+                console.log(`📊 [Browser] Encoded data URL size: ${dataUrl.length} characters`);
+                console.log(`✅ [Browser] SVG QR code successfully converted without data loss`);
+                return dataUrl;
+              } catch (e) {
+                console.log(`❌ [Browser] Error converting SVG: ${e}`);
+                continue;
               }
             }
           }
@@ -1303,14 +1255,17 @@ export function createPaymentTools(
             const alt = (img.alt || '').toLowerCase();
             const className = (img.className || '').toLowerCase();
             
+            // Skip SVG icons and decorative images
             if (src.includes('icon') || src.includes('.svg')) continue;
             if (className.includes('icon') || className.includes('logo')) continue;
             if (alt.includes('icon') && !alt.includes('qr code')) continue;
             
+            // Skip tiny images
             const width = img.naturalWidth || img.width;
             const height = img.naturalHeight || img.height;
             if (width < 100 || height < 100) continue;
             
+            // Check if this looks like a QR code image
             const hasQrInTestId = img.getAttribute('data-testid')?.toLowerCase().includes('qr');
             const hasQrInAlt = alt.includes('qr');
             const hasQrInSrc = src.includes('/qr/') || src.includes('qr-code') || src.includes('qrcode') || src.includes('paydigi');
@@ -1326,82 +1281,87 @@ export function createPaymentTools(
           console.log('🔍 [Browser] No QR code found');
           return null;
           
-        } catch (error) {
-          console.log(`❌ [Browser] Fatal error in QR detection: ${error}`);
-          return null;
-        }
-      });
-
-      console.log('📊 QR extraction result:', qrImageUrl ? `Found (${qrImageUrl.substring(0, 50)}...)` : 'Not found');
-
-      if (!qrImageUrl) {
-        console.log('❌ No QR code found on page');
-        return "No UPI QR code found on the current page. The QR code may still be loading or not present.";
-      }
-
-      console.log('✅ QR code image URL extracted');
-
-      const notificationUrl = process.env.PAYMENT_NOTIFICATION_URL;
-      const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-      
-      console.log('\n=== PUSH NOTIFICATION STATUS ===');
-      if (notificationUrl && supabaseAnonKey) {
-        try {
-          console.log('📱 Sending payment notification to user\'s phone...');
-          console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
-          
-          const payload = {
-            paymentData: paymentData || { paymentType: "unknown" },
-            paymentUrl: qrImageUrl
-          };
-          
-          const response = await fetch(notificationUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${supabaseAnonKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-          
-          if (response.ok) {
-            const responseData = await response.text();
-            console.log('✅ NOTIFICATION SENT SUCCESSFULLY!');
-            console.log('Response:', responseData);
-          } else {
-            const errorText = await response.text();
-            console.error('❌ NOTIFICATION FAILED!');
-            console.error('Status:', response.status);
-            console.error('Error:', errorText);
+          } catch (error) {
+            console.log(`❌ [Browser] Fatal error in QR detection: ${error}`);
+            return null;
           }
-        } catch (error) {
-          console.error('❌ NOTIFICATION ERROR!');
-          console.error('Error details:', error);
+        });
+
+        console.log('📊 QR extraction result:', qrImageUrl ? `Found (${qrImageUrl.substring(0, 50)}...)` : 'Not found');
+
+        if (!qrImageUrl) {
+          console.log('❌ No QR code found on page');
+          return "No UPI QR code found on the current page. The QR code may still be loading or not present.";
         }
-      } else {
-        console.log('⚠️  NOTIFICATION NOT CONFIGURED!');
-        console.log('Missing environment variables:');
-        if (!notificationUrl) console.log('  - PAYMENT_NOTIFICATION_URL is not set');
-        if (!supabaseAnonKey) console.log('  - SUPABASE_ANON_KEY is not set');
+
+        console.log('✅ QR code image URL extracted:', qrImageUrl.substring(0, 100) + '...');
+
+        // Send QR URL to user's phone via HTTP POST to Supabase function
+        const notificationUrl = process.env.PAYMENT_NOTIFICATION_URL;
+        const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+        
+        console.log('\n=== PUSH NOTIFICATION STATUS ===');
+        if (notificationUrl && supabaseAnonKey) {
+          try {
+            console.log('📱 Sending payment notification to user\'s phone...');
+            console.log('Notification URL:', notificationUrl);
+            console.log('Payment Data:', JSON.stringify(paymentData, null, 2));
+            
+            const payload = {
+              paymentData: paymentData || { paymentType: "unknown" },
+              paymentUrl: qrImageUrl
+            };
+            
+            const response = await fetch(notificationUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${supabaseAnonKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+            
+            if (response.ok) {
+              const responseData = await response.text();
+              console.log('✅ NOTIFICATION SENT SUCCESSFULLY!');
+              console.log('Response:', responseData);
+            } else {
+              const errorText = await response.text();
+              console.error('❌ NOTIFICATION FAILED!');
+              console.error('Status:', response.status);
+              console.error('Error:', errorText);
+            }
+          } catch (error) {
+            console.error('❌ NOTIFICATION ERROR!');
+            console.error('Error details:', error);
+          }
+        } else {
+          console.log('⚠️  NOTIFICATION NOT CONFIGURED!');
+          console.log('Missing environment variables:');
+          if (!notificationUrl) console.log('  - PAYMENT_NOTIFICATION_URL is not set');
+          if (!supabaseAnonKey) console.log('  - SUPABASE_ANON_KEY is not set');
+          console.log('\nTo enable push notifications, add these to your .env file:');
+          console.log('  PAYMENT_NOTIFICATION_URL=https://your-supabase-function-url');
+          console.log('  SUPABASE_ANON_KEY=your-supabase-anon-key');
+          console.log('\nUser will NOT receive QR code on their phone.');
+        }
+        console.log('================================\n');
+
+        return JSON.stringify({
+          success: true,
+          qrCodeUrl: qrImageUrl,
+          message: "QR code URL extracted and sent to your phone. Please complete payment within 5 minutes. Use wait_for_payment tool to check payment status.",
+        }, null, 2);
+      } catch (error) {
+        return `Failed to extract QR code: ${error}`;
       }
-      console.log('================================\n');
-
-      return JSON.stringify({
-        success: true,
-        qrCodeUrl: qrImageUrl,
-        message: "QR code extracted and sent to your phone. Please complete payment within 5 minutes.",
-      }, null, 2);
-    } catch (error) {
-      return `Failed to extract QR code: ${error}`;
+    },
+    {
+      name: "scan_upi_qr_code",
+      description: "Extract QR code image URL from payment page. CRITICAL: Only use AFTER clicking all required buttons (Make Payment, Proceed, Show QR). QR code is NOT visible immediately after clicking QR tab - you must click buttons first to reveal it. Check user prompt for button click steps before using this tool.",
+      schema: z.object({}),
     }
-  },
-  {
-    name: "scan_upi_qr_code",
-    description: "Extract QR code image URL from payment page with accurate data preservation. Converts SVG QR codes to PNG to prevent data corruption. Sends notification to user's phone with the QR code.",
-    schema: z.object({}),
-  }
-);
-
+  );
 
   return [
     navigateToWebsite,
