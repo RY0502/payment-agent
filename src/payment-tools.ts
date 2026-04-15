@@ -1225,10 +1225,16 @@ export function createPaymentTools(
             const looksLikeQr = pathCount > 10 || (pathCount >= 1 && hasComplexPath);
             
             if (hasQrContext && looksLikeQr) {
-              console.log(`✅ [Browser] SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
-              // Mark SVG for screenshot (prevents data corruption)
-              svg.setAttribute('data-qr-screenshot-target', 'true');
-              return { type: 'svg', found: true };
+              console.log(`SVG QR code found with ${pathCount} paths, complex: ${hasComplexPath}`);
+              // Inline SVG to data URL conversion
+              try {
+                const serializer = new XMLSerializer();
+                const svgString = serializer.serializeToString(svg);
+                return 'data:image/svg+xml;base64,' + btoa(svgString);
+              } catch (e) {
+                console.log(`❌ [Browser] Error converting SVG: ${e}`);
+                continue;
+              }
             }
           }
 
@@ -1258,38 +1264,28 @@ export function createPaymentTools(
             const parentHasQr = img.parentElement?.className?.toLowerCase().includes('qr');
             
             if (hasQrInTestId || hasQrInAlt || hasQrInSrc || hasQrInClass || parentHasQr) {
-              console.log('✅ [Browser] IMG QR code found:', src.substring(0, 50));
-              // Mark IMG for screenshot
-              img.setAttribute('data-qr-screenshot-target', 'true');
-              return { type: 'img', found: true };
+              console.log('IMG QR code found:', src.substring(0, 50));
+              return img.src;
             }
           }
           
-          console.log('❌ [Browser] No QR code found');
-          return { found: false };
+          console.log('🔍 [Browser] No QR code found');
+          return null;
           
           } catch (error) {
             console.log(`❌ [Browser] Fatal error in QR detection: ${error}`);
-            return { found: false };
+            return null;
           }
         });
 
-        console.log('📊 QR detection result:', qrImageUrl.found ? `Found (${qrImageUrl.type})` : 'Not found');
+        console.log('📊 QR extraction result:', qrImageUrl ? `Found (${qrImageUrl.substring(0, 50)}...)` : 'Not found');
 
-        if (!qrImageUrl.found) {
+        if (!qrImageUrl) {
           console.log('❌ No QR code found on page');
           return "No UPI QR code found on the current page. The QR code may still be loading or not present.";
         }
 
-        // Screenshot the QR code element (pixel-perfect, zero data corruption)
-        console.log('📸 Taking screenshot of QR code element...');
-        const qrLocator = page.locator('[data-qr-screenshot-target="true"]');
-        const screenshotBuffer = await qrLocator.screenshot({ type: 'png' });
-        
-        // Convert PNG buffer to base64 data URL
-        const base64 = screenshotBuffer.toString('base64');
-        const qrDataUrl = `data:image/png;base64,${base64}`;
-        console.log('✅ QR code screenshot captured:', qrDataUrl.length, 'bytes');
+        console.log('✅ QR code image URL extracted:', qrImageUrl.substring(0, 100) + '...');
 
         // Send QR URL to user's phone via HTTP POST to Supabase function
         const notificationUrl = process.env.PAYMENT_NOTIFICATION_URL;
@@ -1304,7 +1300,7 @@ export function createPaymentTools(
             
             const payload = {
               paymentData: paymentData || { paymentType: "unknown" },
-              paymentUrl: qrDataUrl
+              paymentUrl: qrImageUrl
             };
             
             const response = await fetch(notificationUrl, {
@@ -1344,8 +1340,8 @@ export function createPaymentTools(
 
         return JSON.stringify({
           success: true,
-          qrCodeUrl: qrDataUrl,
-          message: "QR code screenshot captured and sent to your phone. Please complete payment within 5 minutes. Use wait_for_payment tool to check payment status.",
+          qrCodeUrl: qrImageUrl,
+          message: "QR code URL extracted and sent to your phone. Please complete payment within 5 minutes. Use wait_for_payment tool to check payment status.",
         }, null, 2);
       } catch (error) {
         return `Failed to extract QR code: ${error}`;
