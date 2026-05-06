@@ -560,34 +560,62 @@ Use tools to interact with the page. Adapt to what you see on each page.`;
     ...normalizedMessages,
   ];
 
-  const llmWithTools = llm!.bindTools(tools);
+  const llmWithTools = llm!.bindTools(tools, {
+    tool_choice: "auto" // Let model decide when to use tools
+  });
   
-  try {
-    const response = await llmWithTools.invoke(messages);
-    return {
-      messages: [response],
-      paymentData: paymentData,
-      targetUrl: targetUrl,
-    };
-  } catch (error: any) {
-    console.error("Error in agent LLM call:", error);
-    
-    // Check if it's a rate limit or API error
-    if (error.message && (error.message.includes('429') || error.message.includes('rate limit'))) {
-      console.log("Rate limit error detected - closing browser...");
-      try {
-        if (browser) {
-          await browser.close();
-          console.log("Browser closed due to rate limit error");
-        }
-      } catch (cleanupError) {
-        console.error("Error closing browser:", cleanupError);
+  // Retry logic for Groq tool calling errors (malformed JSON)
+  const maxRetries = 3;
+  let lastError: any = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await llmWithTools.invoke(messages);
+      return {
+        messages: [response],
+        paymentData: paymentData,
+        targetUrl: targetUrl,
+      };
+    } catch (error: any) {
+      lastError = error;
+      
+      // Check if it's a Groq tool calling error
+      const isToolCallError = error.message && (
+        error.message.includes('Failed to call a function') ||
+        error.message.includes('tool_use_failed') ||
+        error.error?.code === 'tool_use_failed'
+      );
+      
+      if (isToolCallError && attempt < maxRetries) {
+        console.log(`⚠️ Groq tool calling error (attempt ${attempt}/${maxRetries}), retrying...`);
+        console.log(`Failed generation: ${error.error?.failed_generation || 'N/A'}`);
+        // Wait briefly before retry
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        continue;
       }
+      
+      console.error("Error in agent LLM call:", error);
+      
+      // Check if it's a rate limit or API error
+      if (error.message && (error.message.includes('429') || error.message.includes('rate limit'))) {
+        console.log("Rate limit error detected - closing browser...");
+        try {
+          if (browser) {
+            await browser.close();
+            console.log("Browser closed due to rate limit error");
+          }
+        } catch (cleanupError) {
+          console.error("Error closing browser:", cleanupError);
+        }
+      }
+      
+      // If not a retryable error or max retries reached, throw
+      throw error;
     }
-    
-    // Re-throw to fail the run
-    throw error;
   }
+  
+  // If we get here, all retries failed
+  throw lastError;
 }
 
 async function toolNode(state: PaymentState) {
