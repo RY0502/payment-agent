@@ -773,6 +773,7 @@ export function createPaymentTools(
         // Strategy 0A: Try clicking on tab/link/button/div elements (for BillDesk tabs, Jio buttons, etc.)
         try {
           const keywords = paymentMethodName.toLowerCase().replace(/\s+/g, '');
+          const escapedPaymentMethodName = paymentMethodName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           
           console.log(`Strategy 0A: Looking for tab/link/button with keyword: ${keywords}`);
           
@@ -797,6 +798,18 @@ export function createPaymentTools(
           console.log(`Strategy 0A: Found ${count} matching tab/link elements`);
           
           if (count > 0) {
+            const exactTabTextLocator = page
+              .locator('ul.tabs li a span')
+              .filter({ hasText: new RegExp(`^\\s*${escapedPaymentMethodName}\\s*$`, 'i') });
+            const exactTabTextCount = await exactTabTextLocator.count();
+
+            if (exactTabTextCount > 0) {
+              await exactTabTextLocator.first().locator('..').click({ timeout: 15000 });
+              console.log(`✅ Selected payment option by exact tab text match`);
+              await page.waitForTimeout(1000);
+              return `Successfully selected "${paymentMethodName}" payment option using exact tab text`;
+            }
+
             await tabLocator.first().click({ timeout: 15000 });
             console.log(`✅ Selected payment option by clicking tab/link element`);
             // Wait for tab content to load
