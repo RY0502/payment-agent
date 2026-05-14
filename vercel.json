@@ -1,7 +1,7 @@
 {
   "version": 2,
   "outputDirectory": "dist",
-  "buildCommand": "npm run build && npx playwright install chromium",
+  "buildCommand": "PLAYWRIGHT_BROWSERS_PATH=node_modules/.playwright npm run build && PLAYWRIGHT_BROWSERS_PATH=node_modules/.playwright npx playwright install chromium",
   "functions": {
     "api/payment.ts": {
       "maxDuration": 300,
@@ -15,6 +15,7 @@
   "env": {
     "NODE_ENV": "production",
     "HEADLESS": "true",
-    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "0"
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "0",
+    "PLAYWRIGHT_BROWSERS_PATH": "node_modules/.playwright"
   }
 }
