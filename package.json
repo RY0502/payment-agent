@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "vercel-build": "tsc && npx playwright install chromium",
+    "vercel-build": "PLAYWRIGHT_BROWSERS_PATH=0 tsc && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium",
     "clean": "rm -rf dist",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
