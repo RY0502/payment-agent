@@ -3,13 +3,11 @@
   "functions": {
     "api/payment.ts": {
       "maxDuration": 300,
-      "memory": 1024,
-      "runtime": "nodejs18.x"
+      "memory": 1024
     },
     "api/health.ts": {
       "maxDuration": 10,
-      "memory": 128,
-      "runtime": "nodejs18.x"
+      "memory": 128
     }
   },
   "env": {
