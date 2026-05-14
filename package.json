@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "vercel-build": "tsc",
+    "vercel-build": "tsc && pnpm exec playwright install chromium && pnpm exec playwright install-deps chromium",
     "clean": "rm -rf dist",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
@@ -32,8 +32,6 @@
     "langchain": "^1.2.3",
     "mailgun.js": "^12.7.1",
     "playwright": "^1.58.2",
-    "playwright-core": "^1.58.2",
-    "@sparticuz/chromium": "^148.0.0",
     "sharp": "^0.34.5",
     "zod": "^4.2.1"
   },
