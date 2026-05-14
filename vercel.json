@@ -1,20 +1,21 @@
 {
   "version": 2,
   "outputDirectory": "dist",
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "npm run build",
   "functions": {
     "api/payment.ts": {
       "maxDuration": 300,
-      "memory": 1024
+      "memory": 1024,
+      "runtime": "nodejs20.x"
     },
     "api/health.ts": {
       "maxDuration": 10,
-      "memory": 128
+      "memory": 128,
+      "runtime": "nodejs20.x"
     }
   },
   "env": {
     "NODE_ENV": "production",
-    "HEADLESS": "true",
-    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "0"
+    "HEADLESS": "true"
   }
 }
