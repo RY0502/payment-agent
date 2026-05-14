@@ -26,16 +26,30 @@ export class BrowserManager {
 
     // Check if running in production/server environment
     const isProduction = process.env.NODE_ENV === 'production' || process.env.HEADLESS === 'true';
+    const isVercel = process.env.VERCEL === '1';
 
-    // Use @sparticuz/chromium for both local and Vercel
-    console.log('🚀 Using @sparticuz/chromium for browser automation');
-    const chromiumPkg = await import('@sparticuz/chromium');
-    
-    this.browser = await chromium.launch({
-      headless: isProduction,
-      executablePath: await chromiumPkg.default.executablePath(),
-      args: chromiumPkg.default.args,
-    });
+    // Use @sparticuz/chromium on Vercel (Linux), standard Playwright locally (macOS)
+    if (isVercel) {
+      console.log('🚀 Using @sparticuz/chromium for Vercel (Linux)');
+      const chromiumPkg = await import('@sparticuz/chromium');
+      
+      this.browser = await chromium.launch({
+        headless: true,
+        executablePath: await chromiumPkg.default.executablePath(),
+        args: chromiumPkg.default.args,
+      });
+    } else {
+      console.log('🚀 Using standard Playwright for local development');
+      this.browser = await chromium.launch({
+        headless: isProduction,
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+        ],
+      });
+    }
 
     this.context = await this.browser.newContext({
       viewport: { width: 1280, height: 720 },
