@@ -26,38 +26,51 @@ export class BrowserManager {
 
     // Check if running in production/server environment
     const isProduction = process.env.NODE_ENV === 'production' || process.env.HEADLESS === 'true';
+    const isVercel = process.env.VERCEL === '1';
 
-    this.browser = await chromium.launch({
-      headless: isProduction,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        // Memory optimization for low-memory environments (1GB RAM)
-        "--single-process",
-        "--disable-features=site-per-process",
-        "--js-flags=--max-old-space-size=256",
-        "--disable-software-rasterizer",
-        "--disable-background-networking",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-extensions",
-        "--disable-features=TranslateUI",
-        "--disable-ipc-flooding-protection",
-        "--disable-renderer-backgrounding",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--no-default-browser-check",
-        "--no-pings"
-      ],
-    });
+    // Use @sparticuz/chromium for Vercel serverless
+    if (isVercel) {
+      const chromiumPkg = await import('@sparticuz/chromium');
+      const chromiumExecutable = await chromiumPkg.default.executablePath();
+      
+      this.browser = await chromium.launch({
+        headless: true,
+        executablePath: chromiumExecutable,
+        args: chromiumPkg.default.args,
+      });
+    } else {
+      this.browser = await chromium.launch({
+        headless: isProduction,
+        args: [
+          "--disable-blink-features=AutomationControlled",
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-accelerated-2d-canvas",
+          "--no-first-run",
+          "--no-zygote",
+          "--disable-gpu",
+          // Memory optimization for low-memory environments (1GB RAM)
+          "--single-process",
+          "--disable-features=site-per-process",
+          "--js-flags=--max-old-space-size=256",
+          "--disable-software-rasterizer",
+          "--disable-background-networking",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-breakpad",
+          "--disable-component-extensions-with-background-pages",
+          "--disable-extensions",
+          "--disable-features=TranslateUI",
+          "--disable-ipc-flooding-protection",
+          "--disable-renderer-backgrounding",
+          "--metrics-recording-only",
+          "--mute-audio",
+          "--no-default-browser-check",
+          "--no-pings"
+        ],
+      });
+    }
 
     this.context = await this.browser.newContext({
       viewport: { width: 1280, height: 720 },
