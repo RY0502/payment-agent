@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "vercel-build": "tsc && playwright install chromium",
     "clean": "rm -rf dist",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
@@ -40,6 +41,7 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.50.1",
     "@typescript-eslint/parser": "^8.50.1",
+    "@vercel/node": "^3.2.29",
     "dotenv": "^17.2.3",
     "eslint": "^9.39.2",
     "globals": "^16.5.0",
