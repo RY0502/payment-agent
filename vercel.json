@@ -16,6 +16,6 @@
     "NODE_ENV": "production",
     "HEADLESS": "true",
     "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "0",
-    "PLAYWRIGHT_BROWSERS_PATH": "/tmp/pw-browsers"
+    "PLAYWRIGHT_BROWSERS_PATH": "node_modules/.cache/ms-playwright"
   }
 }
