@@ -212,6 +212,30 @@ export function createPaymentTools(
           return `Failed to click button: Browser page not available`;
         }
 
+        // Pre-strategy: Scroll to element if it exists anywhere on page (handles overflow containers)
+        try {
+          console.log(`📜 Pre-strategy: Scrolling to find "${buttonDescription}" in overflow containers...`);
+          await page.evaluate((searchText: string) => {
+            const normalizedSearch = searchText.toLowerCase().trim();
+            
+            // Find all elements containing the text
+            const allElements = Array.from(document.querySelectorAll('*'));
+            for (const el of allElements) {
+              if (el.textContent?.toLowerCase().includes(normalizedSearch)) {
+                // Scroll this element into view
+                (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+                console.log(`Found and scrolled to: ${el.tagName}`);
+                return;
+              }
+            }
+          }, buttonDescription);
+          
+          // Wait for scroll to complete
+          await page.waitForTimeout(1000);
+        } catch (scrollError) {
+          console.log(`📜 Pre-strategy scroll failed: ${scrollError}`);
+        }
+
         // Strategy 1: Try by role with regex name (partial match)
         try {
           const keywords = buttonDescription.toLowerCase().split(' ');
@@ -222,15 +246,31 @@ export function createPaymentTools(
           console.log(`Found ${count} button(s) matching pattern`);
           
           if (count > 0) {
-            // If multiple matches, click the first visible one
-            await buttonLocator.first().click({ timeout: 3000 });
-            console.log(`✅ Clicked button matching "${buttonDescription}" using role locator`);
+            const element = buttonLocator.first();
+            
+            // Wait for any loaders to disappear
+            try {
+              await page.waitForSelector('.Loader_preloader__2jBNF, [class*="loader"], [class*="spinner"]', { state: 'hidden', timeout: 5000 });
+              console.log('✅ Loader disappeared');
+            } catch (loaderError) {
+              console.log('⚠️ No loader found or timeout, proceeding...');
+            }
+            
+            try {
+              // Try Playwright click first
+              await element.click({ timeout: 3000 });
+              console.log(`✅ Clicked button matching "${buttonDescription}" using role locator`);
+            } catch (clickError) {
+              console.log(`Playwright click failed, using JavaScript click`);
+              // Fallback to JavaScript click
+              await element.evaluate((el) => (el as HTMLElement).click());
+              console.log(`✅ Clicked button using JavaScript click`);
+            }
+            
             try {
               await browser.waitForNavigation();
-              // Wait additional time for dynamic content to load
               await page.waitForTimeout(2000);
             } catch (navError) {
-              // Navigation wait failed, but click succeeded - still wait for dynamic content
               await page.waitForTimeout(2000);
             }
             return `Successfully clicked "${buttonDescription}" button`;
@@ -248,8 +288,24 @@ export function createPaymentTools(
           console.log(`Found ${count} element(s) with text`);
           
           if (count > 0) {
-            await textLocator.first().click({ timeout: 3000 });
-            console.log(`✅ Clicked button matching "${buttonDescription}" using text locator`);
+            const element = textLocator.first();
+            
+            // Wait for any loaders to disappear
+            try {
+              await page.waitForSelector('.Loader_preloader__2jBNF, [class*="loader"], [class*="spinner"]', { state: 'hidden', timeout: 5000 });
+            } catch (loaderError) {
+              // No loader or timeout
+            }
+            
+            try {
+              await element.click({ timeout: 3000 });
+              console.log(`✅ Clicked button matching "${buttonDescription}" using text locator`);
+            } catch (clickError) {
+              console.log(`Playwright click failed, using JavaScript click`);
+              await element.evaluate((el: any) => (el as HTMLElement).click());
+              console.log(`✅ Clicked using JavaScript click`);
+            }
+            
             try {
               await browser.waitForNavigation();
             } catch (navError) {
@@ -271,35 +327,56 @@ export function createPaymentTools(
           console.log(`Found ${count} element(s) with text`);
           
           if (count > 0) {
-            // Find the outermost clickable parent (could be button, div, a, span, etc.)
             const element = clickableLocator.first();
-            // Try to find parent with click handler or cursor pointer
-            const clickableParent = await element.evaluateHandle((el) => {
-              let current = el;
-              // Walk up the DOM tree to find a clickable parent
-              while (current && current !== document.body) {
-                const style = window.getComputedStyle(current);
-                const hasClickHandler = current.onclick !== null;
-                const isClickable = style.cursor === 'pointer' || hasClickHandler;
-                const isButton = current.tagName === 'BUTTON' || current.tagName === 'A';
-                
-                // Prefer buttons/links, or elements with click indicators
-                if (isButton || isClickable) {
-                  return current;
-                }
-                current = current.parentElement as HTMLElement;
-              }
-              return el; // Return original element if no clickable parent found
-            });
             
-            await clickableParent.asElement()?.click({ timeout: 3000 });
-            console.log(`✅ Clicked element matching "${buttonDescription}"`);
+            // First, scroll element into view
             try {
-              await browser.waitForNavigation();
-            } catch (navError) {
-              // Navigation wait failed, but click succeeded
+              await element.scrollIntoViewIfNeeded({ timeout: 2000 });
+            } catch (scrollError) {
+              console.log(`Scroll warning: ${scrollError}`);
             }
-            return `Successfully clicked "${buttonDescription}" using generic clickable element`;
+            
+            // Try Playwright click first
+            try {
+              await element.click({ timeout: 3000, force: false });
+              console.log(`✅ Clicked element matching "${buttonDescription}" using Playwright click`);
+              try {
+                await browser.waitForNavigation();
+              } catch (navError) {
+                // Navigation wait failed, but click succeeded
+              }
+              return `Successfully clicked "${buttonDescription}" using generic clickable element`;
+            } catch (clickError) {
+              console.log(`Playwright click failed, trying JavaScript click: ${clickError}`);
+              
+              // Fallback: Use JavaScript click (works even if element is outside viewport)
+              await element.evaluate((el) => {
+                // Find clickable parent
+                let current: HTMLElement | SVGElement | null = el as HTMLElement;
+                while (current && current !== document.body) {
+                  const style = window.getComputedStyle(current);
+                  const hasClickHandler = (current as any).onclick !== null;
+                  const isClickable = style.cursor === 'pointer' || hasClickHandler;
+                  const isButton = current.tagName === 'BUTTON' || current.tagName === 'A';
+                  
+                  if (isButton || isClickable) {
+                    (current as HTMLElement).click();
+                    return;
+                  }
+                  current = current.parentElement as HTMLElement | null;
+                }
+                // If no clickable parent, click the element itself
+                (el as HTMLElement).click();
+              });
+              
+              console.log(`✅ Clicked element matching "${buttonDescription}" using JavaScript click`);
+              try {
+                await browser.waitForNavigation();
+              } catch (navError) {
+                // Navigation wait failed, but click succeeded
+              }
+              return `Successfully clicked "${buttonDescription}" using JavaScript click`;
+            }
           }
         } catch (e1c) {
           console.log(`❌ Strategy 1c failed: ${e1c}`);
@@ -1200,7 +1277,7 @@ export function createPaymentTools(
         
         // Take screenshot for debugging
         const debugScreenshot = await browser.captureScreenshot();
-        console.log('📸 Debug screenshot:', debugScreenshot);
+        console.log('📸 Debug screenshot captured (length:', debugScreenshot.length, 'chars)');
         
         // Get page HTML to check if QR exists
         const pageHtml = await page.content();
