@@ -958,20 +958,38 @@ const workflow = new StateGraph(PaymentStateAnnotation)
  */
 const compiledGraph = workflow.compile();
 
+// Save the original invoke method before wrapping
+const originalInvoke = compiledGraph.invoke.bind(compiledGraph);
+
+// Track if invoke is already running to prevent recursion
+let isInvokeRunning = false;
+
 /**
  * Wrapped agent with error handling to ensure browser cleanup on exceptions
  * Clears all state before each run to ensure independence between payment runs
  */
 const wrappedInvoke = async (input: any) => {
-  // Debug: Log input paymentData
-  console.log('🔍 wrappedInvoke called with input.paymentData:', JSON.stringify(input.paymentData));
+  // Prevent recursive invocations
+  if (isInvokeRunning) {
+    console.error('⚠️ WARNING: wrappedInvoke called while already running! Ignoring recursive call.');
+    throw new Error('Agent invoke already in progress');
+  }
   
-  // Clear all agent state before starting a new run
-  // This ensures no conflicting data or messages from previous runs
-  await clearAgentState();
+  isInvokeRunning = true;
   
   try {
-    return await compiledGraph.invoke(input);
+    // Debug: Log input paymentData
+    console.log('🔍 wrappedInvoke called with input.paymentData:', JSON.stringify(input.paymentData));
+    
+    // Clear all agent state before starting a new run
+    // This ensures no conflicting data or messages from previous runs
+    await clearAgentState();
+    
+    console.log('🚀 Starting graph execution...');
+    const result = await originalInvoke(input);
+    console.log('✅ Graph execution completed successfully');
+    
+    return result;
   } catch (error) {
     console.error("Fatal error in payment flow:", error);
     
@@ -994,6 +1012,8 @@ const wrappedInvoke = async (input: any) => {
     
     // Re-throw the error
     throw error;
+  } finally {
+    isInvokeRunning = false;
   }
 };
 
