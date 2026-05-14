@@ -278,7 +278,7 @@ export function createPaymentTools(
               console.log(`✅ Clicked button matching "${buttonDescription}" using text locator`);
             } catch (clickError) {
               console.log(`Playwright click failed, using JavaScript click`);
-              await element.evaluate((el) => (el as HTMLElement).click());
+              await element.evaluate((el: any) => (el as HTMLElement).click());
               console.log(`✅ Clicked using JavaScript click`);
             }
             
