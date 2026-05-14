@@ -69,6 +69,8 @@ const server = http.createServer(async (req, res) => {
     req.on("end", async () => {
       try {
         const requestBody = JSON.parse(body);
+        const streamMode = requestBody.stream_mode || [];
+        const shouldStream = streamMode.includes('values') || streamMode.includes('updates');
 
         // Support two formats:
         // Format 1: Natural language prompt (array or string)
@@ -79,24 +81,30 @@ const server = http.createServer(async (req, res) => {
         let targetUrl: string = "";
 
         // Check if it's a natural language prompt (array or string in 'prompt' or 'message' field)
-        if (requestBody.prompt || requestBody.message) {
-          const promptData = requestBody.prompt || requestBody.message;
-          
-          // Handle array format (like your example)
-          if (Array.isArray(promptData)) {
-            messageContent = promptData.join('\n');
+        if (requestBody.prompt || requestBody.message || requestBody.input?.messages) {
+          // Handle LangGraph format: { input: { messages: [...] } }
+          if (requestBody.input?.messages) {
+            const messages = requestBody.input.messages;
+            messageContent = messages.map((m: any) => m.content).join("\n");
           } else {
-            messageContent = promptData;
+            const promptData = requestBody.prompt || requestBody.message;
+            
+            // Handle array format (like your example)
+            if (Array.isArray(promptData)) {
+              messageContent = promptData.join('\n');
+            } else {
+              messageContent = promptData;
+            }
           }
           
           console.log("\n📥 Received natural language prompt:");
           console.log(messageContent.substring(0, 500) + (messageContent.length > 500 ? '...' : ''));
           console.log("\n⏳ Processing payment with prompt...\n");
+          console.log("Streaming:", shouldStream);
 
-          // Let the agent extract payment data from the prompt
-          const result = await agent.invoke({
+          const initialState = {
             messages: [new HumanMessage(messageContent)],
-            paymentData: {}, // Empty - will be extracted from prompt
+            paymentData: {} as any, // Empty - will be extracted from prompt
             targetUrl: "", // Empty - will be extracted from prompt
             currentUrl: "",
             currentStep: "initial",
@@ -105,7 +113,41 @@ const server = http.createServer(async (req, res) => {
             isPaymentComplete: false,
             confirmationDetails: "",
             error: "",
-          });
+          };
+
+          // SSE Streaming mode
+          if (shouldStream) {
+            res.writeHead(200, {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Access-Control-Allow-Origin': '*',
+            });
+
+            try {
+              // Stream agent execution
+              const stream = await agent.stream(initialState as any);
+              
+              for await (const chunk of stream) {
+                const eventData = JSON.stringify(chunk);
+                res.write(`event: data\n`);
+                res.write(`data: ${eventData}\n\n`);
+              }
+
+              res.write('event: end\n');
+              res.write('data: {}\n\n');
+              res.end();
+            } catch (streamError: any) {
+              console.error("Streaming error:", streamError);
+              res.write(`event: error\n`);
+              res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
+              res.end();
+            }
+            return;
+          }
+
+          // Non-streaming mode (original behavior)
+          const result = await agent.invoke(initialState as any);
 
           if (result.isPaymentComplete) {
             console.log("\n✅ Payment Successful!");
@@ -160,8 +202,9 @@ const server = http.createServer(async (req, res) => {
         console.log("Payment Data:", JSON.stringify(paymentData, null, 2));
         console.log("Target URL:", targetUrl);
         console.log("\n⏳ Processing payment...\n");
+        console.log("Streaming:", shouldStream);
 
-        const result = await agent.invoke({
+        const initialState = {
           messages: [
             new HumanMessage(
               `Complete the payment on ${targetUrl} using the provided payment data. Start by navigating to the website and analyzing the page.`
@@ -176,7 +219,40 @@ const server = http.createServer(async (req, res) => {
           isPaymentComplete: false,
           confirmationDetails: "",
           error: "",
-        });
+        };
+
+        // SSE Streaming mode
+        if (shouldStream) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+          });
+
+          try {
+            const stream = await agent.stream(initialState as any);
+            
+            for await (const chunk of stream) {
+              const eventData = JSON.stringify(chunk);
+              res.write(`event: data\n`);
+              res.write(`data: ${eventData}\n\n`);
+            }
+
+            res.write('event: end\n');
+            res.write('data: {}\n\n');
+            res.end();
+          } catch (streamError: any) {
+            console.error("Streaming error:", streamError);
+            res.write(`event: error\n`);
+            res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
+            res.end();
+          }
+          return;
+        }
+
+        // Non-streaming mode
+        const result = await agent.invoke(initialState as any);
 
         if (result.isPaymentComplete) {
           console.log("\n✅ Payment Successful!");
