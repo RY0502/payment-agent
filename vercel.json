@@ -1,6 +1,7 @@
 {
   "version": 2,
   "outputDirectory": "dist",
+  "buildCommand": "npm run build && npx playwright install chromium",
   "functions": {
     "api/payment.ts": {
       "maxDuration": 300,
@@ -13,6 +14,7 @@
   },
   "env": {
     "NODE_ENV": "production",
-    "HEADLESS": "true"
+    "HEADLESS": "true",
+    "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "0"
   }
 }
