@@ -212,30 +212,6 @@ export function createPaymentTools(
           return `Failed to click button: Browser page not available`;
         }
 
-        // Pre-strategy: Scroll to element if it exists anywhere on page (handles overflow containers)
-        try {
-          console.log(`📜 Pre-strategy: Scrolling to find "${buttonDescription}" in overflow containers...`);
-          await page.evaluate((searchText: string) => {
-            const normalizedSearch = searchText.toLowerCase().trim();
-            
-            // Find all elements containing the text
-            const allElements = Array.from(document.querySelectorAll('*'));
-            for (const el of allElements) {
-              if (el.textContent?.toLowerCase().includes(normalizedSearch)) {
-                // Scroll this element into view
-                (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
-                console.log(`Found and scrolled to: ${el.tagName}`);
-                return;
-              }
-            }
-          }, buttonDescription);
-          
-          // Wait for scroll to complete
-          await page.waitForTimeout(1000);
-        } catch (scrollError) {
-          console.log(`📜 Pre-strategy scroll failed: ${scrollError}`);
-        }
-
         // Strategy 1: Try by role with regex name (partial match)
         try {
           const keywords = buttonDescription.toLowerCase().split(' ');
@@ -497,6 +473,18 @@ export function createPaymentTools(
           }
         } catch (e5) {
           // All strategies failed
+        }
+
+        // Final fallback: Log entire HTML for debugging
+        try {
+          console.log('\n=== HTML DEBUG FOR BUTTON CLICK FAILURE ===');
+          console.log(`Looking for: "${buttonDescription}"`);
+          const pageHtml = await page.content();
+          console.log('📄 Full page HTML:');
+          console.log(pageHtml);
+          console.log('=== END HTML DEBUG ===\n');
+        } catch (debugError) {
+          console.log(`Failed to capture HTML for debugging: ${debugError}`);
         }
 
         return `Could not find button matching: ${buttonDescription}`;
