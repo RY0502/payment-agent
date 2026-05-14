@@ -5,7 +5,11 @@ import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const SCREENSHOTS_DIR = path.join(__dirname, "../screenshots");
+
+// Use /tmp for Vercel (serverless), otherwise use local screenshots directory
+const SCREENSHOTS_DIR = process.env.VERCEL
+  ? path.join("/tmp", "screenshots")
+  : path.join(__dirname, "../screenshots");
 
 export class BrowserManager {
   private browser: Browser | null = null;
