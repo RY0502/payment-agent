@@ -212,50 +212,6 @@ export function createPaymentTools(
           return `Failed to click button: Browser page not available`;
         }
 
-        // Strategy 0: Use page.evaluate to find clickable elements by text content (most reliable)
-        try {
-          console.log(`🔍 Strategy 0: Searching DOM for clickable elements with text: ${buttonDescription}`);
-          const clicked = await page.evaluate((searchText) => {
-            const normalizedSearch = searchText.toLowerCase().trim();
-            
-            // Find all potentially clickable elements
-            const clickableSelectors = 'button, a, [role="button"], [onclick], div[class*="button"], div[class*="btn"], span[class*="button"], span[class*="btn"]';
-            const elements = Array.from(document.querySelectorAll(clickableSelectors));
-            
-            console.log(`Found ${elements.length} potentially clickable elements`);
-            
-            // Find elements whose text content matches
-            for (const el of elements) {
-              const text = el.textContent?.toLowerCase().trim() || '';
-              const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
-              const title = el.getAttribute('title')?.toLowerCase() || '';
-              
-              if (text.includes(normalizedSearch) || ariaLabel.includes(normalizedSearch) || title.includes(normalizedSearch)) {
-                console.log(`Found matching element: ${el.tagName} with text: "${text}"`);
-                (el as HTMLElement).click();
-                return true;
-              }
-            }
-            
-            return false;
-          }, buttonDescription);
-          
-          if (clicked) {
-            console.log(`✅ Clicked button matching "${buttonDescription}" using DOM search`);
-            try {
-              await browser.waitForNavigation();
-              await page.waitForTimeout(2000);
-            } catch (navError) {
-              await page.waitForTimeout(2000);
-            }
-            return `Successfully clicked "${buttonDescription}" button`;
-          } else {
-            console.log(`❌ Strategy 0 failed: No matching element found`);
-          }
-        } catch (e0) {
-          console.log(`❌ Strategy 0 failed: ${e0}`);
-        }
-
         // Strategy 1: Try by role with regex name (partial match)
         try {
           const keywords = buttonDescription.toLowerCase().split(' ');
