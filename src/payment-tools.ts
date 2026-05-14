@@ -212,6 +212,22 @@ export function createPaymentTools(
           return `Failed to click button: Browser page not available`;
         }
 
+        // Pre-strategy: Wait for dynamic content to load (especially for Vercel/sparticuz)
+        console.log(`⏳ Waiting for dynamic content to load: "${buttonDescription}"`);
+        try {
+          await page.waitForFunction(
+            (text) => {
+              const pageText = document.body.innerText.toLowerCase();
+              return pageText.includes(text.toLowerCase());
+            },
+            buttonDescription,
+            { timeout: 10000 }
+          );
+          console.log(`✅ Dynamic content loaded: "${buttonDescription}"`);
+        } catch (waitError) {
+          console.log(`⚠️ Content wait timeout, proceeding anyway: ${waitError}`);
+        }
+
         // Strategy 1: Try by role with regex name (partial match)
         try {
           const keywords = buttonDescription.toLowerCase().split(' ');
