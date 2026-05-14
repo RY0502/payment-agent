@@ -19,12 +19,12 @@ COPY . .
 # Build TypeScript
 RUN pnpm run build
 
-# Expose port (Vercel will set PORT env variable)
-EXPOSE 3000
-
 # Set environment variables
 ENV NODE_ENV=production
 ENV HEADLESS=true
 
-# Start the server
-CMD ["node", "dist/server.js"]
+# Vercel sets PORT dynamically
+EXPOSE $PORT
+
+# Start the server (use PORT from environment)
+CMD node dist/server.js
