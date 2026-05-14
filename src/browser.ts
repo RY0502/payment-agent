@@ -36,7 +36,44 @@ export class BrowserManager {
       this.browser = await chromium.launch({
         headless: true,
         executablePath: await chromiumPkg.default.executablePath(),
-        args: chromiumPkg.default.args,
+        args: [
+          ...chromiumPkg.default.args,
+          
+          // === Rendering & Security ===
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-blink-features=AutomationControlled',
+          
+          // === Font & Text Rendering (CRITICAL for SVG/QR) ===
+          '--font-render-hinting=none',
+          '--enable-font-antialiasing',
+          '--force-color-profile=srgb',
+          '--disable-lcd-text',
+          
+          // === GPU & Graphics (helps canvas/SVG) ===
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--use-gl=swiftshader',
+          
+          // === JavaScript & DOM ===
+          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--disable-features=VizDisplayCompositor',
+          
+          // === Performance & Memory ===
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-dev-shm-usage',
+          
+          // === Compatibility ===
+          '--disable-extensions',
+          '--disable-component-extensions-with-background-pages',
+          '--disable-default-apps',
+          '--mute-audio',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+        ],
       });
     } else {
       console.log('🚀 Using standard Playwright for local development');
@@ -55,9 +92,40 @@ export class BrowserManager {
       viewport: { width: 1280, height: 720 },
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      
+      // Enhanced compatibility options
+      deviceScaleFactor: 1,
+      isMobile: false,
+      hasTouch: false,
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      permissions: [],
+      colorScheme: 'light',
+      reducedMotion: 'reduce',
     });
 
     this.page = await this.context.newPage();
+    
+    // Add extra page settings for Vercel to improve rendering consistency
+    if (isVercel) {
+      // Disable animations that might interfere with rendering
+      await this.page.addInitScript(() => {
+        // Disable CSS animations and transitions
+        const style = document.createElement('style');
+        style.textContent = `
+          *, *::before, *::after {
+            animation-duration: 0s !important;
+            animation-delay: 0s !important;
+            transition-duration: 0s !important;
+            transition-delay: 0s !important;
+          }
+        `;
+        document.head.appendChild(style);
+      });
+      
+      // Set extra viewport properties
+      await this.page.setViewportSize({ width: 1280, height: 720 });
+    }
     
     // Handle dialogs/popups - don't auto-dismiss them
     this.page.on('dialog', async (dialog) => {
