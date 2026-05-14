@@ -27,36 +27,14 @@ export class BrowserManager {
     // Check if running in production/server environment
     const isProduction = process.env.NODE_ENV === 'production' || process.env.HEADLESS === 'true';
 
+    // Use @sparticuz/chromium for both local and Vercel
+    console.log('🚀 Using @sparticuz/chromium for browser automation');
+    const chromiumPkg = await import('@sparticuz/chromium');
+    
     this.browser = await chromium.launch({
       headless: isProduction,
-      args: [
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-        // Memory optimization for low-memory environments (1GB RAM)
-        "--single-process",
-        "--disable-features=site-per-process",
-        "--js-flags=--max-old-space-size=256",
-        "--disable-software-rasterizer",
-        "--disable-background-networking",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-extensions",
-        "--disable-features=TranslateUI",
-        "--disable-ipc-flooding-protection",
-        "--disable-renderer-backgrounding",
-        "--metrics-recording-only",
-        "--mute-audio",
-        "--no-default-browser-check",
-        "--no-pings"
-      ],
+      executablePath: await chromiumPkg.default.executablePath(),
+      args: chromiumPkg.default.args,
     });
 
     this.context = await this.browser.newContext({
