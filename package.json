@@ -9,7 +9,6 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "vercel-build": "tsc && pnpm exec playwright install chromium && pnpm exec playwright install-deps chromium",
     "clean": "rm -rf dist",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
