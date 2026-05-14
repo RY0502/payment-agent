@@ -12,6 +12,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const requestBody = req.body;
+    const streamMode = requestBody.stream_mode || [];
+    const shouldStream = streamMode.includes('values') || streamMode.includes('updates');
 
     // Support two formats:
     // Format 1: Natural language prompt
@@ -22,25 +24,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let targetUrl: string = "";
 
     // Check if it's a natural language prompt
-    if (requestBody.prompt || requestBody.message) {
-      const promptData = requestBody.prompt || requestBody.message;
-
-      // Handle array format
-      if (Array.isArray(promptData)) {
-        messageContent = promptData.join("\n");
+    if (requestBody.prompt || requestBody.message || requestBody.input?.messages) {
+      // Handle LangGraph format: { input: { messages: [...] } }
+      if (requestBody.input?.messages) {
+        const messages = requestBody.input.messages;
+        messageContent = messages.map((m: any) => m.content).join("\n");
       } else {
-        messageContent = promptData;
+        const promptData = requestBody.prompt || requestBody.message;
+        // Handle array format
+        if (Array.isArray(promptData)) {
+          messageContent = promptData.join("\n");
+        } else {
+          messageContent = promptData;
+        }
       }
 
       console.log("\n📥 Received natural language prompt:");
       console.log(messageContent.substring(0, 500));
       console.log("\n⏳ Processing payment with prompt...\n");
+      console.log("Streaming:", shouldStream);
 
       // Import agent and use it
       const { agent } = await import("../dist/agent.js");
       const { HumanMessage } = await import("@langchain/core/messages");
 
-      const result = await agent.invoke({
+      const initialState = {
         messages: [new HumanMessage(messageContent)],
         paymentData: {},
         targetUrl: "",
@@ -51,7 +59,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         isPaymentComplete: false,
         confirmationDetails: "",
         error: "",
-      });
+      };
+
+      // SSE Streaming mode
+      if (shouldStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        try {
+          // Stream agent execution
+          const stream = await agent.stream(initialState);
+          
+          for await (const chunk of stream) {
+            const eventData = JSON.stringify(chunk);
+            res.write(`event: data\n`);
+            res.write(`data: ${eventData}\n\n`);
+          }
+
+          res.write('event: end\n');
+          res.write('data: {}\n\n');
+          res.end();
+        } catch (streamError: any) {
+          console.error("Streaming error:", streamError);
+          res.write(`event: error\n`);
+          res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
+          res.end();
+        }
+        return;
+      }
+
+      // Non-streaming mode (original behavior)
+      const result = await agent.invoke(initialState);
 
       if (result.isPaymentComplete) {
         console.log("\n✅ Payment Successful!");
@@ -96,12 +135,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log("Payment Data:", JSON.stringify(paymentData, null, 2));
     console.log("Target URL:", targetUrl);
     console.log("\n⏳ Processing payment...\n");
+    console.log("Streaming:", shouldStream);
 
     // Import agent and use it
     const { agent } = await import("../dist/agent.js");
     const { HumanMessage } = await import("@langchain/core/messages");
 
-    const result = await agent.invoke({
+    const initialState = {
       messages: [
         new HumanMessage(
           `Complete the payment on ${targetUrl} using the provided payment data. Start by navigating to the website and analyzing the page.`
@@ -116,7 +156,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       isPaymentComplete: false,
       confirmationDetails: "",
       error: "",
-    });
+    };
+
+    // SSE Streaming mode
+    if (shouldStream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      try {
+        const stream = await agent.stream(initialState);
+        
+        for await (const chunk of stream) {
+          const eventData = JSON.stringify(chunk);
+          res.write(`event: data\n`);
+          res.write(`data: ${eventData}\n\n`);
+        }
+
+        res.write('event: end\n');
+        res.write('data: {}\n\n');
+        res.end();
+      } catch (streamError: any) {
+        console.error("Streaming error:", streamError);
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify({ error: streamError.message })}\n\n`);
+        res.end();
+      }
+      return;
+    }
+
+    // Non-streaming mode
+    const result = await agent.invoke(initialState);
 
     if (result.isPaymentComplete) {
       console.log("\n✅ Payment Successful!");
