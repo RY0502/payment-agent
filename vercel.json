@@ -1,3 +1,19 @@
 {
-  "version": 2
+  "version": 2,
+  "outputDirectory": "dist",
+  "buildCommand": "npm run build",
+  "functions": {
+    "api/payment.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/health.ts": {
+      "maxDuration": 10,
+      "memory": 128
+    }
+  },
+  "env": {
+    "NODE_ENV": "production",
+    "HEADLESS": "true"
+  }
 }
