@@ -98,14 +98,52 @@ export class BrowserManager {
       deviceScaleFactor: 1,
       isMobile: false,
       hasTouch: false,
-      locale: 'en-US',
-      timezoneId: 'America/New_York',
+      locale: 'en-IN',
+      timezoneId: 'Asia/Kolkata',
       permissions: [],
       colorScheme: 'light',
       reducedMotion: 'reduce',
+      
+      // Add extra headers to look more like a real browser
+      extraHTTPHeaders: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
+      },
     });
 
     this.page = await this.context.newPage();
+    
+    // Add stealth scripts to hide automation
+    await this.page.addInitScript(() => {
+      // Hide webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+      
+      // Add chrome property
+      (window as any).chrome = {
+        runtime: {},
+      };
+      
+      // Mock plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Mock languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-IN', 'en-US', 'en'],
+      });
+    });
     
     // Add extra page settings for Vercel to improve rendering consistency
     if (isVercel) {
