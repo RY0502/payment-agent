@@ -771,11 +771,11 @@ export function createPaymentTools(
           return "No active page found.";
         }
 
-        const totalWaitTime = 5 * 60 * 1000; // 5 minutes
+        const totalWaitTime = 3 * 60 * 1000; // 3 minutes (Vercel timeout is 5 min, need buffer)
         const heartbeatInterval = 30 * 1000; // Send heartbeat every 30 seconds
         const iterations = Math.floor(totalWaitTime / heartbeatInterval);
         
-        console.log('Waiting 5 minutes for payment completion...');
+        console.log('Waiting 3 minutes for payment completion...');
         console.log('Note: Staying on current page, waiting for automatic redirect to success page');
         console.log(`Sending heartbeat every ${heartbeatInterval / 1000} seconds to keep connection alive`);
 
@@ -783,10 +783,11 @@ export function createPaymentTools(
         for (let i = 0; i < iterations; i++) {
           await page.waitForTimeout(heartbeatInterval);
           const elapsed = ((i + 1) * heartbeatInterval) / 1000;
-          console.log(`⏱️ Payment wait progress: ${elapsed}s / 300s (${Math.round((elapsed / 300) * 100)}%)`);
+          const totalSeconds = totalWaitTime / 1000;
+          console.log(`⏱️ Payment wait progress: ${elapsed}s / ${totalSeconds}s (${Math.round((elapsed / totalSeconds) * 100)}%)`);
         }
 
-        console.log('5 minutes elapsed, checking payment status now...');
+        console.log('3 minutes elapsed, checking payment status now...');
 
         // Take screenshot and check for payment success
         const screenshot = await browser.captureScreenshot();
@@ -798,8 +799,8 @@ export function createPaymentTools(
           console.log('Payment successful!');
           return JSON.stringify({
             success: true,
-            message: "Payment completed successfully after 5 minutes.",
-            elapsedSeconds: 300
+            message: "Payment completed successfully after 3 minutes.",
+            elapsedSeconds: 180
           }, null, 2);
         }
 
@@ -814,19 +815,19 @@ export function createPaymentTools(
               success: false,
               message: `Payment failed: ${keyword} detected on page.`,
               reason: keyword,
-              elapsedSeconds: 300
+              elapsedSeconds: 180
             }, null, 2);
           }
         }
 
         // No clear success or failure - payment likely not completed
-        console.log('⚠️  Payment status unclear after 5 minutes - likely not completed');
+        console.log('⚠️  Payment status unclear after 3 minutes - likely not completed');
         console.log('Page did not show success or failure confirmation');
         return JSON.stringify({
           success: false,
-          message: "Payment not completed: No confirmation detected after 5 minutes. Payment likely timed out or was not initiated.",
+          message: "Payment not completed: No confirmation detected after 3 minutes. Payment likely timed out or was not initiated.",
           reason: "timeout_no_payment",
-          elapsedSeconds: 300
+          elapsedSeconds: 180
         }, null, 2);
       } catch (error) {
         return `Error waiting for payment: ${error}`;
@@ -834,7 +835,7 @@ export function createPaymentTools(
     },
     {
       name: "wait_for_payment",
-      description: "Wait exactly 5 minutes for payment completion after QR scan or UPI ID entry, then check once. Stays on current page without navigation. Returns success, failure, or unclear status.",
+      description: "Wait exactly 3 minutes for payment completion after QR scan or UPI ID entry, then check once. Stays on current page without navigation. Returns success, failure, or unclear status.",
       schema: z.object({}),
     }
   );
