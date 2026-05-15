@@ -68,11 +68,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.setHeader('Connection', 'keep-alive');
 
         try {
-          // Stream agent execution
-          const stream = await agent.stream(initialState);
+          // Get stream mode from request (default to 'values')
+          const streamMode = requestBody.stream_mode || ['values'];
+          const config = requestBody.config || {};
+          
+          // Stream agent execution with proper stream mode
+          const stream = await agent.stream(initialState, {
+            ...config,
+            streamMode: streamMode[0] || 'values',
+          });
           
           for await (const chunk of stream) {
-            const eventData = JSON.stringify(chunk);
+            // Format: { event: 'values', data: {...state} }
+            const eventData = JSON.stringify({ 
+              event: streamMode[0] || 'values',
+              data: chunk 
+            });
             res.write(`event: data\n`);
             res.write(`data: ${eventData}\n\n`);
           }
@@ -165,10 +176,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.setHeader('Connection', 'keep-alive');
 
       try {
-        const stream = await agent.stream(initialState);
+        // Get stream mode from request (default to 'values')
+        const streamMode = requestBody.stream_mode || ['values'];
+        const config = requestBody.config || {};
+        
+        // Stream agent execution with proper stream mode
+        const stream = await agent.stream(initialState, {
+          ...config,
+          streamMode: streamMode[0] || 'values',
+        });
         
         for await (const chunk of stream) {
-          const eventData = JSON.stringify(chunk);
+          // Format: { event: 'values', data: {...state} }
+          const eventData = JSON.stringify({ 
+            event: streamMode[0] || 'values',
+            data: chunk 
+          });
           res.write(`event: data\n`);
           res.write(`data: ${eventData}\n\n`);
         }
