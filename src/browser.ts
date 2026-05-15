@@ -7,8 +7,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Use /tmp for Vercel (serverless), otherwise use local screenshots directory
+// Note: On Vercel, __dirname resolves to /var/task/dist, so we use /tmp directly
 const SCREENSHOTS_DIR = process.env.VERCEL
-  ? path.join("/tmp", "screenshots")
+  ? "/tmp/screenshots"
   : path.join(__dirname, "../screenshots");
 
 export class BrowserManager {
