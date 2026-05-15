@@ -1280,22 +1280,6 @@ export function createPaymentTools(
         console.log('Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
         console.log('Browser:', process.env.VERCEL ? '@sparticuz/chromium' : 'Standard Playwright');
         
-        // Take screenshot for debugging
-        const debugScreenshot = await browser.captureScreenshot();
-        console.log('📸 Debug screenshot captured (length:', debugScreenshot.length, 'chars)');
-        
-        // Get page HTML to check if QR exists
-        const pageHtml = await page.content();
-        const htmlLength = pageHtml.length;
-        const hasQrText = pageHtml.toLowerCase().includes('qr');
-        const hasSvgElements = pageHtml.toLowerCase().includes('<svg');
-        const svgCount = (pageHtml.match(/<svg/gi) || []).length;
-        
-        console.log('📄 Page HTML length:', htmlLength);
-        console.log('📄 Contains "qr" text:', hasQrText);
-        console.log('📄 Contains SVG elements:', hasSvgElements);
-        console.log('📄 SVG count:', svgCount);
-
         // Extract QR code image URL (handles both <img> and <svg> elements)
         const qrImageUrl = await page.evaluate(() => {
           try {
