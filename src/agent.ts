@@ -903,14 +903,18 @@ async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> 
   console.log("Cleanup process completed");
 
   // Return updated state with success message added to messages array
+  // IMPORTANT: Include isPaymentComplete flag so streaming clients can detect success
   if (successMessageToAdd) {
     return {
       messages: [...state.messages, successMessageToAdd],
+      isPaymentComplete: state.isPaymentComplete,
+      confirmationDetails: state.confirmationDetails,
     };
   }
 
   return {
     messages: state.messages,
+    isPaymentComplete: state.isPaymentComplete,
   };
 }
 
