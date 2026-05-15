@@ -854,20 +854,33 @@ async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> 
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const screenshotsDir = path.join(process.cwd(), 'screenshots');
+    // Use /tmp on Vercel, local screenshots directory otherwise
+    const screenshotsDir = process.env.VERCEL 
+      ? '/tmp/screenshots'
+      : path.join(process.cwd(), 'screenshots');
     
-    const files = await fs.readdir(screenshotsDir);
-    let deletedCount = 0;
-    
-    for (const file of files) {
-      if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
-        await fs.unlink(path.join(screenshotsDir, file));
-        deletedCount++;
+    // Check if directory exists before trying to read it
+    let files: string[] = [];
+    try {
+      files = await fs.readdir(screenshotsDir);
+      
+      let deletedCount = 0;
+      
+      for (const file of files) {
+        if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+          await fs.unlink(path.join(screenshotsDir, file));
+          deletedCount++;
+        }
       }
-    }
-    
-    if (deletedCount > 0) {
-      console.log(`Deleted ${deletedCount} screenshot(s)`);
+      
+      if (deletedCount > 0) {
+        console.log(`Deleted ${deletedCount} screenshot(s)`);
+      }
+    } catch (readError: any) {
+      // Directory doesn't exist - nothing to clean up
+      if (readError.code !== 'ENOENT') {
+        throw readError;
+      }
     }
   } catch (error) {
     console.error("Error cleaning up screenshots:", error);
