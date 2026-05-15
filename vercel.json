@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "outputDirectory": "dist",
+  "buildCommand": "npm run build",
   "functions": {
     "api/payment.ts": {
       "maxDuration": 300,
