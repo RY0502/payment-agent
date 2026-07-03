@@ -116,7 +116,7 @@ async function ensureInitialized(paymentData?: any) {
     await browser.initialize();
   }
   if (!vision) {
-    vision = new VisionAnalyzer(groqApiKey!);
+    vision = new VisionAnalyzer();
   }
   // Update payment data and recreate tools if data changed
   if (paymentData && JSON.stringify(paymentData) !== JSON.stringify(currentPaymentData)) {

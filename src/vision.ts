@@ -1,12 +1,32 @@
-import Groq from "groq-sdk";
+import {
+  FreeTierOrchestrator,
+  createProviders,
+  type Provider,
+  type LlmInput,
+} from "@freetier/orchestrator";
 import { VisionAnalysisResult } from "./types.js";
 
-export class VisionAnalyzer {
-  private groq: Groq;
-  private model = "meta-llama/llama-4-scout-17b-16e-instruct";
+/**
+ * Preferred provider failover order for vision calls.
+ * Providers without a configured API key are automatically skipped by createProviders().
+ */
+const PROVIDER_PRIORITY = ["Cloudflare", "NVIDIA", "Groq"];
 
-  constructor(apiKey: string) {
-    this.groq = new Groq({ apiKey });
+function buildOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
+  const providers: Provider<LlmInput, string>[] = createProviders();
+  const ordered = [...providers].sort((a, b) => {
+    const rankA = PROVIDER_PRIORITY.indexOf(a.name);
+    const rankB = PROVIDER_PRIORITY.indexOf(b.name);
+    return (rankA === -1 ? PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? PROVIDER_PRIORITY.length : rankB);
+  });
+  return new FreeTierOrchestrator<LlmInput, string>(ordered);
+}
+
+export class VisionAnalyzer {
+  private orchestrator: FreeTierOrchestrator<LlmInput, string>;
+
+  constructor() {
+    this.orchestrator = buildOrchestrator();
   }
 
   async analyzePaymentPage(
@@ -37,30 +57,11 @@ Respond in JSON format:
   "reasoning": "explain your analysis"
 }`;
 
-    const response = await this.groq.chat.completions.create({
-      model: this.model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: prompt,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${screenshot}`,
-              },
-            },
-          ],
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 2000,
+    const content = await this.orchestrator.invoke({
+      system: "You are a web automation expert analyzing payment webpages.",
+      prompt,
+      imageBase64: screenshot,
     });
-
-    const content = response.choices[0]?.message?.content || "{}";
     
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
@@ -93,30 +94,13 @@ ${accessibilityTree}
 Return ONLY the CSS selector, nothing else. If not found, return "null".`;
 
     try {
-      const response = await this.groq.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: prompt,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/png;base64,${screenshot}`,
-                },
-              },
-            ],
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 100,
+      const content = await this.orchestrator.invoke({
+        system: "You are a web automation expert locating page elements.",
+        prompt,
+        imageBase64: screenshot,
       });
 
-      const selector = response.choices[0]?.message?.content?.trim();
+      const selector = content.trim();
       return selector === "null" ? null : selector || null;
     } catch (error) {
       console.error("Vision analysis error:", error);
@@ -135,30 +119,13 @@ A CAPTCHA is typically:
 Answer with ONLY "yes" or "no".`;
 
     try {
-      const response = await this.groq.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: prompt,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/png;base64,${screenshot}`,
-                },
-              },
-            ],
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 10,
+      const content = await this.orchestrator.invoke({
+        system: "You are a web automation expert detecting CAPTCHAs.",
+        prompt,
+        imageBase64: screenshot,
       });
 
-      const answer = response.choices[0]?.message?.content?.trim().toLowerCase();
+      const answer = content.trim().toLowerCase();
       console.log(`Vision model CAPTCHA detection response: "${answer}"`);
       const result = answer === "yes";
       console.log(`Returning hasCaptcha: ${result}`);
@@ -184,30 +151,13 @@ Instructions:
 Return ONLY the CAPTCHA text:`;
 
     try {
-      const response = await this.groq.chat.completions.create({
-        model: this.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: prompt,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/png;base64,${screenshot}`,
-                },
-              },
-            ],
-          },
-        ],
-        temperature: 0.1,
-        max_tokens: 50,
+      const content = await this.orchestrator.invoke({
+        system: "You are a web automation expert reading CAPTCHA text.",
+        prompt,
+        imageBase64: screenshot,
       });
 
-      const captchaText = response.choices[0]?.message?.content?.trim();
+      const captchaText = content.trim();
       return captchaText === "UNREADABLE" ? null : captchaText || null;
     } catch (error) {
       console.error("CAPTCHA solving error:", error);
@@ -236,30 +186,11 @@ Respond with JSON:
   "reasoning": "explain your decision"
 }`;
 
-    const response = await this.groq.chat.completions.create({
-      model: this.model,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: prompt,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${screenshot}`,
-              },
-            },
-          ],
-        },
-      ],
-      temperature: 0.1,
-      max_tokens: 500,
+    const content = await this.orchestrator.invoke({
+      system: "You are a web automation expert detecting payment success confirmations.",
+      prompt,
+      imageBase64: screenshot,
     });
-
-    const content = response.choices[0]?.message?.content || "{}";
     
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);

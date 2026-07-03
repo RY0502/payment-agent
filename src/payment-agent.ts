@@ -74,7 +74,7 @@ export class PaymentReActAgent {
 
   constructor(groqApiKey: string) {
     this.browser = new BrowserManager();
-    this.vision = new VisionAnalyzer(groqApiKey);
+    this.vision = new VisionAnalyzer();
     this.llm = new ChatGroq({
       apiKey: groqApiKey,
       model: "llama-3.3-70b-versatile",

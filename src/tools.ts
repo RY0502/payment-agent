@@ -18,7 +18,7 @@ if (!groqApiKey) {
 }
 
 const browser = new BrowserManager();
-const vision = new VisionAnalyzer(groqApiKey);
+const vision = new VisionAnalyzer();
 
 /**
  * All payment tools available to the agent.
