@@ -122,6 +122,30 @@ export class BrowserManager {
 
     this.page = await this.context.newPage();
     
+    // Intercept requests to inject Origin header for cross-origin XHRs
+    // This fixes CORS issues with payment gateways like BillDesk that validate Origin
+    await this.context.route('**/*', async (route) => {
+      const request = route.request();
+      const headers = { ...request.headers() };
+      
+      // For XHRs/fetches to different origins, ensure Origin header is set
+      if (request.resourceType() === 'xhr' || request.resourceType() === 'fetch') {
+        const requestUrl = new URL(request.url());
+        const pageUrl = this.page?.url();
+        if (pageUrl) {
+          const pageOrigin = new URL(pageUrl).origin;
+          const requestOrigin = requestUrl.origin;
+          
+          // If cross-origin, set Origin to the page's origin (what a real browser would do)
+          if (requestOrigin !== pageOrigin) {
+            headers['origin'] = pageOrigin;
+          }
+        }
+      }
+      
+      await route.continue({ headers });
+    });
+    
     // Add stealth scripts to hide automation
     await this.page.addInitScript(() => {
       // Hide webdriver property

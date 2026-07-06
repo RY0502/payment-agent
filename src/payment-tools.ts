@@ -491,6 +491,66 @@ export function createPaymentTools(
           // All strategies failed
         }
 
+        // Strategy 6: Last resort - dispatch full mouse event sequence at element's screen coordinates
+        // Needed for modal dialogs, onclick handlers, and elements that require the mousedown→mouseup→click sequence
+        try {
+          console.log(`🔍 Strategy 6: Full mouse event dispatch for: "${buttonDescription}"`);
+          const dispatched = await page.evaluate((description: string) => {
+            const normalize = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+            const target = normalize(description);
+
+            const candidates = Array.from(
+              document.querySelectorAll('button, a, [role="button"], input[type="submit"], input[type="button"], div, span')
+            );
+
+            let best: any = null;
+            for (const el of candidates) {
+              const text = normalize((el as any).innerText || (el as any).getAttribute('aria-label') || (el as any).getAttribute('title') || ((el as any).value) || '');
+              const idOrName = normalize(((el as any).id || '') + ' ' + ((el as any).getAttribute('name') || ''));
+              if (!text && !idOrName) continue;
+              if (text.includes(target) || idOrName.includes(target.replace(/\s+/g, ''))) {
+                const rect = (el as any).getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                  best = el;
+                  break;
+                }
+              }
+            }
+
+            if (!best) return false;
+
+            (best as any).scrollIntoView({ block: 'center', inline: 'center' });
+            const rect = (best as any).getBoundingClientRect();
+            const eventOpts: any = {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX: rect.left + rect.width / 2,
+              clientY: rect.top + rect.height / 2,
+            };
+
+            (best as any).dispatchEvent(new MouseEvent('mouseover', eventOpts));
+            (best as any).dispatchEvent(new MouseEvent('mousedown', eventOpts));
+            (best as any).dispatchEvent(new MouseEvent('mouseup', eventOpts));
+            (best as any).dispatchEvent(new MouseEvent('click', eventOpts));
+            return true;
+          }, buttonDescription);
+
+          if (dispatched) {
+            console.log(`✅ Clicked "${buttonDescription}" using full mouse event dispatch (Strategy 6 - last resort)`);
+            try {
+              await browser.waitForNavigation();
+              await page.waitForTimeout(2000);
+            } catch (navError) {
+              await page.waitForTimeout(2000);
+            }
+            return `Successfully clicked "${buttonDescription}" using mouse event dispatch (last resort)`;
+          }
+          console.log(`❌ Strategy 6 found no matching element for: "${buttonDescription}"`);
+        } catch (e6) {
+          console.log(`❌ Strategy 6 failed: ${e6}`);
+        }
+
         // Final fallback: Log entire HTML for debugging
         try {
           console.log('\n=== HTML DEBUG FOR BUTTON CLICK FAILURE ===');
