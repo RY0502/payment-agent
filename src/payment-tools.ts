@@ -1340,7 +1340,7 @@ export function createPaymentTools(
         console.log('Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
         console.log('Browser:', process.env.VERCEL ? '@sparticuz/chromium' : 'Standard Playwright');
         
-        // Extract QR code image URL (handles both <img> and <svg> elements)
+        // Extract QR code image URL (handles <img>, <svg>, and <canvas> elements)
         const qrImageUrl = await page.evaluate(() => {
           try {
             console.log('🔍 [Browser] Starting QR code detection...');
@@ -1429,6 +1429,31 @@ export function createPaymentTools(
             }
           }
           
+          // Fallback: Try to find QR codes rendered on a <canvas> element
+          // (common with JS QR libraries like qrcode.js / qrcode-generator)
+          console.log('🔍 [Browser] Searching for canvas elements...');
+          const allCanvases = Array.from(document.querySelectorAll('canvas'));
+          console.log(`🔍 [Browser] Found ${allCanvases.length} canvas elements`);
+          for (const canvas of allCanvases) {
+            const width = canvas.width || canvas.clientWidth;
+            const height = canvas.height || canvas.clientHeight;
+
+            // QR codes are square and reasonably sized
+            if (width < 100 || height < 100) continue;
+            if (Math.abs(width - height) > 50) continue;
+
+            try {
+              const dataUrl = canvas.toDataURL('image/png');
+              if (dataUrl && dataUrl.length > 100) {
+                console.log(`Canvas QR code found: ${width}x${height}`);
+                return dataUrl;
+              }
+            } catch (e) {
+              console.log(`❌ [Browser] Error reading canvas (possibly tainted): ${e}`);
+              continue;
+            }
+          }
+
           console.log('🔍 [Browser] No QR code found');
           return null;
           
