@@ -12,19 +12,18 @@
 
 import "dotenv/config";
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { ChatGroq } from "@langchain/groq";
-import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import {
+  FreeTierOrchestrator,
+  createTextProviders,
+  type Provider,
+  type LlmInput,
+} from "@freetier/orchestrator";
+import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 import { createPaymentTools } from "./payment-tools.js";
 import { PaymentData } from "./types.js";
 import { EmailService } from "./email-service.js";
-
-const groqApiKey = process.env.GROQ_API_KEY;
-
-if (!groqApiKey) {
-  throw new Error("GROQ_API_KEY environment variable is required");
-}
 
 const MAX_ATTEMPTS_PER_STEP = 3;
 
@@ -73,11 +72,173 @@ const PaymentStateAnnotation = Annotation.Root({
 
 type PaymentState = typeof PaymentStateAnnotation.State;
 
+const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
+
+function buildTextOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
+  const providers: Provider<LlmInput, string>[] = createTextProviders();
+  const ordered = [...providers].sort((a, b) => {
+    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(a.name);
+    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(b.name);
+    return (rankA === -1 ? TEXT_PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? TEXT_PROVIDER_PRIORITY.length : rankB);
+  });
+  return new FreeTierOrchestrator<LlmInput, string>(ordered);
+}
+
 let browser: BrowserManager | null = null;
 let vision: VisionAnalyzer | null = null;
 let tools: any[] = [];
-let llm: ChatGroq | null = null;
+let textOrchestrator: FreeTierOrchestrator<LlmInput, string> | null = null;
 let currentPaymentData: any = null;
+
+/**
+ * Format available payment tools into readable instructions for the LLM prompt.
+ */
+function formatToolsDocumentation(toolsList: any[]): string {
+  const descriptions: Record<string, string> = {
+    navigate_to_website: `navigate_to_website({ "url": "https://example.com" }) - Navigate to URL`,
+    analyze_current_page: `analyze_current_page({ "paymentData": { ... }, "currentStep": "step description" }) - Analyze page with vision AI to detect visible fields, buttons, and CAPTCHA`,
+    fill_form_field: `fill_form_field({ "fieldDescription": "field name or placeholder", "value": "value to type" }) - Fill a form field by description`,
+    click_button: `click_button({ "buttonDescription": "button text" }) - Click a button by description`,
+    select_dropdown_option: `select_dropdown_option({ "dropdownDescription": "dropdown name", "optionText": "option to choose" }) - Select from dropdown`,
+    select_payment_option: `select_payment_option({ "paymentMethodName": "BillDesk|UPI|GooglePay|QR|etc" }) - Select payment gateway, payment tab, or payment method`,
+    check_payment_success: `check_payment_success({}) - Verify if payment succeeded (MANDATORY after successful wait_for_payment)`,
+    get_current_page_info: `get_current_page_info({}) - Get current page details (URL, title, text)`,
+    list_clickable_elements: `list_clickable_elements({}) - List all visible clickable buttons/links`,
+    solve_captcha: `solve_captcha({}) - Read and return CAPTCHA text using vision AI`,
+    handle_dialog: `handle_dialog({ "action": "accept"|"dismiss", "promptText": "text" }) - Accept or dismiss browser popup dialog`,
+    wait_for_payment: `wait_for_payment({}) - Wait 5 minutes for payment completion after QR scan or UPI submit`,
+    scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`
+  };
+
+  return toolsList.map(t => descriptions[t.name] || `${t.name} - ${t.description || "Execute " + t.name}`).join('\n');
+}
+
+/**
+ * Serialize conversation history into structured prompt text for the LLM.
+ */
+function formatConversationHistory(messages: any[]): string {
+  const lines: string[] = [];
+  
+  for (const msg of messages) {
+    if (typeof msg === 'string') {
+      lines.push(`User: ${msg}`);
+    } else if (msg && typeof msg === 'object') {
+      const type = msg._getType ? msg._getType() : (msg.constructor?.name || msg.role || 'message');
+      const content = typeof msg.content === 'string' ? msg.content : (Array.isArray(msg.content) ? msg.content.join('\n') : JSON.stringify(msg.content));
+      
+      if (type === 'human' || type === 'HumanMessage' || msg.role === 'user' || msg.role === 'human') {
+        lines.push(`User:\n${content}`);
+      } else if (type === 'ai' || type === 'AIMessage' || msg.role === 'assistant') {
+        let text = `Assistant Thought: ${content || 'Deciding next action'}`;
+        if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          const calls = msg.tool_calls.map((tc: any) => 
+            `Tool Action: ${tc.name}(${JSON.stringify(tc.args || {})})`
+          ).join('\n');
+          text += `\n${calls}`;
+        }
+        lines.push(text);
+      } else if (type === 'tool' || type === 'ToolMessage' || msg.role === 'tool') {
+        const name = msg.name || 'tool';
+        lines.push(`Observation (${name}):\n${content}`);
+      } else if (type !== 'system' && type !== 'SystemMessage') {
+        lines.push(`${type}: ${content}`);
+      }
+    }
+  }
+  
+  return lines.join('\n\n');
+}
+
+/**
+ * Parse model response text into structured thought and tool calls.
+ */
+function parseModelToolResponse(responseText: string): { thought: string; toolCalls: Array<{ id: string; name: string; args: any }>; finalResponse?: string } {
+  let cleanText = responseText.trim();
+  
+  // Extract JSON if wrapped in markdown fences
+  const jsonBlockMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlockMatch) {
+    cleanText = jsonBlockMatch[1].trim();
+  }
+  
+  // Try to find JSON object or array
+  const jsonMatch = cleanText.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      
+      // Case 1: Standard single tool call object: { thought, tool, args } or { name, args }
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const toolName = parsed.tool || parsed.name || parsed.tool_name || parsed.action || parsed.tool_call?.name;
+        let toolArgs = parsed.args || parsed.arguments || parsed.parameters || parsed.tool_call?.args || {};
+        
+        if (typeof toolArgs === 'string') {
+          try {
+            toolArgs = JSON.parse(toolArgs);
+          } catch (_parseErr) {
+            // Keep toolArgs as string if not valid JSON
+          }
+        }
+        
+        const thought = parsed.thought || parsed.reasoning || parsed.explanation || (toolName ? `Executing ${toolName}` : cleanText);
+        
+        if (toolName && typeof toolName === 'string') {
+          const toolCallId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          return {
+            thought,
+            toolCalls: [{
+              id: toolCallId,
+              name: toolName.trim(),
+              args: typeof toolArgs === 'object' && toolArgs !== null ? toolArgs : {},
+            }],
+          };
+        }
+        
+        // Case 2: Array of tools inside object
+        if (Array.isArray(parsed.tools)) {
+          const toolCalls = parsed.tools.map((t: any) => ({
+            id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            name: (t.tool || t.name || '').trim(),
+            args: t.args || t.arguments || {},
+          })).filter((tc: any) => tc.name);
+          
+          if (toolCalls.length > 0) {
+            return { thought, toolCalls };
+          }
+        }
+        
+        return {
+          thought,
+          toolCalls: [],
+          finalResponse: parsed.finalResponse || parsed.message || parsed.response || thought,
+        };
+      }
+      
+      // Case 3: Array of tool calls
+      if (Array.isArray(parsed)) {
+        const toolCalls = parsed.map((t: any) => ({
+          id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          name: (t.tool || t.name || '').trim(),
+          args: t.args || t.arguments || {},
+        })).filter((tc: any) => tc.name);
+        
+        return {
+          thought: toolCalls.length > 0 ? `Executing ${toolCalls.map(t => t.name).join(', ')}` : cleanText,
+          toolCalls,
+        };
+      }
+    } catch (parseError) {
+      console.warn("Could not parse JSON from model output, falling back to plain text:", parseError);
+    }
+  }
+  
+  // Fallback: Plain text response without tool call
+  return {
+    thought: cleanText,
+    toolCalls: [],
+    finalResponse: cleanText,
+  };
+}
 
 /**
  * Clear all agent state before a new run to prevent data conflicts
@@ -101,7 +262,7 @@ async function clearAgentState() {
   browser = null;
   vision = null;
   tools = [];
-  llm = null;
+  textOrchestrator = null;
   // Note: NOT clearing currentPaymentData here - it will be updated in ensureInitialized
   
   // Clear any timeout trackers
@@ -131,13 +292,8 @@ async function ensureInitialized(paymentData?: any) {
   } else {
     console.log('🔍 Tools already exist, currentPaymentData:', JSON.stringify(currentPaymentData));
   }
-  if (!llm) {
-    llm = new ChatGroq({
-      apiKey: groqApiKey!,
-      model: "llama-3.3-70b-versatile",
-      //model: "openai/gpt-oss-120b",
-      temperature: 0.1,
-    });
+  if (!textOrchestrator) {
+    textOrchestrator = buildTextOrchestrator();
   }
 }
 
@@ -269,8 +425,10 @@ User message: ${messageContent}
 Return ONLY the JSON object, no other text.`;
 
       try {
-        const extractionResponse = await llm!.invoke([new SystemMessage(extractionPrompt)]);
-        const extractedText = typeof extractionResponse.content === 'string' ? extractionResponse.content : JSON.stringify(extractionResponse.content);
+        const extractedText = await textOrchestrator!.invoke({
+          system: "You are a data extraction expert. Return ONLY valid JSON.",
+          prompt: extractionPrompt,
+        });
         console.log("🔍 LLM extraction response:", extractedText);
         
         // Parse JSON from response
@@ -541,61 +699,75 @@ Page 4: See "Payment Successful" → Done
 
 Use tools to interact with the page. Adapt to what you see on each page.`;
 
-  // Normalize messages for Groq - convert array content to strings
-  const normalizedMessages = state.messages.map(msg => {
-    if (msg && typeof msg === 'object' && 'content' in msg) {
-      // If content is an array, join it with newlines
-      if (Array.isArray(msg.content)) {
-        return {
-          ...msg,
-          content: msg.content.join('\n')
-        };
-      }
-    }
-    return msg;
-  });
+  const fullSystemPrompt = `${systemPrompt}
 
-  const messages = [
-    new SystemMessage(systemPrompt),
-    ...normalizedMessages,
-  ];
+AVAILABLE TOOLS:
+${formatToolsDocumentation(tools)}
 
-  const llmWithTools = llm!.bindTools(tools, {
-    tool_choice: "auto" // Let model decide when to use tools
-  });
-  
-  // Retry logic for Groq tool calling errors (malformed JSON)
+RESPONSE FORMAT INSTRUCTIONS:
+You MUST respond with valid JSON in one of these two formats:
+
+Format 1 - To execute a tool action:
+{
+  "thought": "Brief explanation of your reasoning and what step you are taking",
+  "tool": "tool_name",
+  "args": {
+    "arg1": "value1"
+  }
+}
+
+Format 2 - When payment is completely finished or no further actions can be taken:
+{
+  "thought": "Reasoning about why process is complete",
+  "finalResponse": "Payment completed successfully / Summary of result"
+}
+
+IMPORTANT RULES:
+1. Always respond with ONLY valid JSON.
+2. Only select tools from the AVAILABLE TOOLS list.
+3. Follow the numbered steps from the user prompt in exact sequence.
+4. After clicking any navigation button, remember to analyze_current_page.`;
+
+  const conversationHistory = formatConversationHistory(state.messages);
+
+  const agentPrompt = `CONVERSATION HISTORY AND CURRENT STATE:
+${conversationHistory}
+
+Based on the conversation history, observations, and instructions above, determine your next action. Respond with JSON:`;
+
   const maxRetries = 3;
   let lastError: any = null;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await llmWithTools.invoke(messages);
+      const responseText = await textOrchestrator!.invoke({
+        system: fullSystemPrompt,
+        prompt: agentPrompt,
+      });
+
+      console.log(`🤖 Model response (attempt ${attempt}):`, responseText);
+
+      const { thought, toolCalls, finalResponse } = parseModelToolResponse(responseText);
+
+      const aiResponse = new AIMessage({
+        content: toolCalls.length > 0 ? thought : (finalResponse || thought),
+        tool_calls: toolCalls,
+      });
+
       return {
-        messages: [response],
+        messages: [aiResponse],
         paymentData: paymentData,
         targetUrl: targetUrl,
       };
     } catch (error: any) {
       lastError = error;
-      
-      // Check if it's a Groq tool calling error
-      const isToolCallError = error.message && (
-        error.message.includes('Failed to call a function') ||
-        error.message.includes('tool_use_failed') ||
-        error.error?.code === 'tool_use_failed'
-      );
-      
-      if (isToolCallError && attempt < maxRetries) {
-        console.log(`⚠️ Groq tool calling error (attempt ${attempt}/${maxRetries}), retrying...`);
-        console.log(`Failed generation: ${error.error?.failed_generation || 'N/A'}`);
-        // Wait briefly before retry
+      console.error(`Error in agent FreeTier LLM call (attempt ${attempt}/${maxRetries}):`, error);
+
+      if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
         continue;
       }
-      
-      console.error("Error in agent LLM call:", error);
-      
+
       // Check if it's a rate limit or API error
       if (error.message && (error.message.includes('429') || error.message.includes('rate limit'))) {
         console.log("Rate limit error detected - closing browser...");
@@ -608,13 +780,11 @@ Use tools to interact with the page. Adapt to what you see on each page.`;
           console.error("Error closing browser:", cleanupError);
         }
       }
-      
-      // If not a retryable error or max retries reached, throw
+
       throw error;
     }
   }
-  
-  // If we get here, all retries failed
+
   throw lastError;
 }
 

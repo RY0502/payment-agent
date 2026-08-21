@@ -11,12 +11,6 @@ import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 import { createPaymentTools } from "./payment-tools.js";
 
-const groqApiKey = process.env.GROQ_API_KEY;
-
-if (!groqApiKey) {
-  throw new Error("GROQ_API_KEY environment variable is required");
-}
-
 const browser = new BrowserManager();
 const vision = new VisionAnalyzer();
 
