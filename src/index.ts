@@ -47,7 +47,7 @@ try {
     currentUrl: "",
     currentStep: "initial",
     attemptCount: 0,
-    maxAttempts: 5,
+    maxAttempts: 50,
     isPaymentComplete: false,
     confirmationDetails: "",
     error: "",
