@@ -817,6 +817,7 @@ async function toolNode(state: PaymentState) {
 
   const toolMessages = [];
   let waitForPaymentSuccess = false;
+  let checkPaymentSuccessResult: any = null;
   
   for (const toolCall of toolCalls) {
     const tool = tools.find((t) => t.name === toolCall.name);
@@ -843,6 +844,19 @@ async function toolNode(state: PaymentState) {
             // Result not JSON or doesn't have success field
           }
         }
+
+        // Check if check_payment_success returned success
+        if (toolCall.name === 'check_payment_success') {
+          try {
+            const parsedResult = JSON.parse(result);
+            if (parsedResult.success === true) {
+              console.log('check_payment_success confirmed payment completion');
+              checkPaymentSuccessResult = parsedResult;
+            }
+          } catch (parseError) {
+            // Result not JSON or doesn't have success field
+          }
+        }
       } catch (error) {
         toolMessages.push(
           new ToolMessage({
@@ -856,6 +870,16 @@ async function toolNode(state: PaymentState) {
   }
 
   const currentUrl = await browser!.getCurrentUrl();
+
+  if (checkPaymentSuccessResult) {
+    return {
+      messages: toolMessages,
+      currentUrl,
+      attemptCount: state.attemptCount + 1,
+      isPaymentComplete: true,
+      confirmationDetails: checkPaymentSuccessResult.confirmationText || "Payment completed successfully",
+    };
+  }
 
   // If wait_for_payment detected success, automatically trigger check_success
   if (waitForPaymentSuccess) {
@@ -922,7 +946,7 @@ function shouldContinue(state: PaymentState): string {
     return "tools";
   }
 
-  return END;
+  return "cleanup";
 }
 
 async function cleanupNode(state: PaymentState): Promise<Partial<PaymentState>> {
@@ -1143,10 +1167,17 @@ const workflow = new StateGraph(PaymentStateAnnotation)
  * The compiled payment automation graph.
  * This graph can be invoked by LangGraph CLI or used programmatically.
  */
+const DEFAULT_RECURSION_LIMIT = 150;
+
+/**
+ * The compiled payment automation graph.
+ * This graph can be invoked by LangGraph CLI or used programmatically.
+ */
 const compiledGraph = workflow.compile();
 
-// Save the original invoke method before wrapping
+// Save the original invoke and stream methods before wrapping
 const originalInvoke = compiledGraph.invoke.bind(compiledGraph);
+const originalStream = compiledGraph.stream.bind(compiledGraph);
 
 // Track if invoke is already running to prevent recursion
 let isInvokeRunning = false;
@@ -1155,7 +1186,7 @@ let isInvokeRunning = false;
  * Wrapped agent with error handling to ensure browser cleanup on exceptions
  * Clears all state before each run to ensure independence between payment runs
  */
-const wrappedInvoke = async (input: any) => {
+const wrappedInvoke = async (input: any, config?: any) => {
   // Prevent recursive invocations
   if (isInvokeRunning) {
     console.error('⚠️ WARNING: wrappedInvoke called while already running! Ignoring recursive call.');
@@ -1173,7 +1204,11 @@ const wrappedInvoke = async (input: any) => {
     await clearAgentState();
     
     console.log('🚀 Starting graph execution...');
-    const result = await originalInvoke(input);
+    const mergedConfig = {
+      recursionLimit: DEFAULT_RECURSION_LIMIT,
+      ...config,
+    };
+    const result = await originalInvoke(input, mergedConfig);
     console.log('✅ Graph execution completed successfully');
     
     return result;
@@ -1193,7 +1228,7 @@ const wrappedInvoke = async (input: any) => {
     }
     
     // Clear timeout tracker
-    if (input.targetUrl) {
+    if (input?.targetUrl) {
       paymentStartTime.delete(input.targetUrl);
     }
     
@@ -1204,7 +1239,49 @@ const wrappedInvoke = async (input: any) => {
   }
 };
 
-// Export the compiled graph with wrapped invoke method
+/**
+ * Wrapped stream with error handling and default recursionLimit configuration
+ */
+const wrappedStream = async function* (input: any, config?: any) {
+  try {
+    console.log('🔍 wrappedStream called with input.paymentData:', JSON.stringify(input?.paymentData));
+    await clearAgentState();
+
+    const mergedConfig = {
+      recursionLimit: DEFAULT_RECURSION_LIMIT,
+      ...config,
+    };
+
+    const stream = await originalStream(input, mergedConfig);
+    for await (const chunk of stream) {
+      yield chunk;
+    }
+  } catch (error) {
+    console.error("Fatal error in payment stream:", error);
+
+    // Ensure browser is closed on any exception
+    try {
+      await ensureInitialized();
+      if (browser) {
+        console.log("Closing browser due to stream error...");
+        await browser.close();
+        console.log("Browser closed after stream error");
+      }
+    } catch (cleanupError) {
+      console.error("Error during emergency cleanup:", cleanupError);
+    }
+
+    // Clear timeout tracker
+    if (input?.targetUrl) {
+      paymentStartTime.delete(input.targetUrl);
+    }
+
+    throw error;
+  }
+};
+
+// Export the compiled graph with wrapped invoke and stream methods
 export const agent = Object.assign(compiledGraph, {
   invoke: wrappedInvoke,
+  stream: wrappedStream,
 });

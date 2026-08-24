@@ -411,7 +411,9 @@ Current attempt: ${state.attemptCount + 1}/${state.maxAttempts}`;
         isPaymentComplete: false,
       };
 
-      const result = await this.graph.invoke(initialState);
+      const result = await this.graph.invoke(initialState, {
+        recursionLimit: 150,
+      });
 
       if (result.isPaymentComplete) {
         return {

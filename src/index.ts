@@ -51,6 +51,8 @@ try {
     isPaymentComplete: false,
     confirmationDetails: "",
     error: "",
+  }, {
+    recursionLimit: 150,
   });
 
   if (result.isPaymentComplete) {

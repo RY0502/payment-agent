@@ -74,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           
           // Stream agent execution with proper stream mode
           const stream = await agent.stream(initialState, {
+            recursionLimit: 150,
             ...config,
             streamMode: streamMode[0] || 'values',
           });
@@ -101,7 +102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Non-streaming mode (original behavior)
-      const result = await agent.invoke(initialState);
+      const result = await agent.invoke(initialState, {
+        recursionLimit: 150,
+      });
 
       if (result.isPaymentComplete) {
         console.log("\n✅ Payment Successful!");
@@ -182,6 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         
         // Stream agent execution with proper stream mode
         const stream = await agent.stream(initialState, {
+          recursionLimit: 150,
           ...config,
           streamMode: streamMode[0] || 'values',
         });
@@ -209,7 +213,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Non-streaming mode
-    const result = await agent.invoke(initialState);
+    const result = await agent.invoke(initialState, {
+      recursionLimit: 150,
+    });
 
     if (result.isPaymentComplete) {
       console.log("\n✅ Payment Successful!");

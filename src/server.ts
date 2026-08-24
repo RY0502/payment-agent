@@ -126,7 +126,9 @@ const server = http.createServer(async (req, res) => {
 
             try {
               // Stream agent execution
-              const stream = await agent.stream(initialState as any);
+              const stream = await agent.stream(initialState as any, {
+                recursionLimit: 150,
+              });
               
               for await (const chunk of stream) {
                 const eventData = JSON.stringify(chunk);
@@ -147,7 +149,9 @@ const server = http.createServer(async (req, res) => {
           }
 
           // Non-streaming mode (original behavior)
-          const result = await agent.invoke(initialState as any);
+          const result = await agent.invoke(initialState as any, {
+            recursionLimit: 150,
+          });
 
           if (result.isPaymentComplete) {
             console.log("\n✅ Payment Successful!");
@@ -231,7 +235,9 @@ const server = http.createServer(async (req, res) => {
           });
 
           try {
-            const stream = await agent.stream(initialState as any);
+            const stream = await agent.stream(initialState as any, {
+              recursionLimit: 150,
+            });
             
             for await (const chunk of stream) {
               const eventData = JSON.stringify(chunk);
@@ -252,7 +258,9 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Non-streaming mode
-        const result = await agent.invoke(initialState as any);
+        const result = await agent.invoke(initialState as any, {
+          recursionLimit: 150,
+        });
 
         if (result.isPaymentComplete) {
           console.log("\n✅ Payment Successful!");
