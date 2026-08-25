@@ -10,7 +10,8 @@ import http from "http";
 import { agent } from "./agent.js";
 import { HumanMessage } from "@langchain/core/messages";
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 
 console.log("🤖 Payment Agent Server\n");
 console.log("💳 Generic Payment Automation Agent");
@@ -312,8 +313,8 @@ const server = http.createServer(async (req, res) => {
   );
 });
 
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`🚀 Server running on http://${HOST}:${PORT}`);
   console.log(`\n📡 Available endpoints:`);
   console.log(`   GET  http://localhost:${PORT}/health`);
   console.log(`   POST http://localhost:${PORT}/payment`);

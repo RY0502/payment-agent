@@ -1,22 +1,23 @@
 module.exports = {
   apps: [{
     name: 'payment-agent',
-    cwd: '/home/opc/payment-agent-main',
-    script: '/home/opc/.nvm/versions/node/v20.18.0/bin/pnpm',
-    args: 'exec langgraphjs dev --host 0.0.0.0 --port 8123 --no-browser',
+    cwd: __dirname,
+    script: 'dist/server.js',
     env: {
       NODE_ENV: 'production',
+      HEADLESS: 'true',
+      PORT: '8123',
       NODE_OPTIONS: '--max-old-space-size=512'
     },
-    max_memory_restart: '400M',
+    max_memory_restart: '768M',
     instances: 1,
     exec_mode: 'fork',
     autorestart: true,
     watch: false,
     max_restarts: 10,
     min_uptime: '10s',
-    error_file: '/home/opc/payment-agent-main/logs/error.log',
-    out_file: '/home/opc/payment-agent-main/logs/out.log',
+    error_file: 'logs/error.log',
+    out_file: 'logs/out.log',
     log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
   }]
 };

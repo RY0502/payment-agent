@@ -106,7 +106,7 @@ function formatToolsDocumentation(toolsList: any[]): string {
     list_clickable_elements: `list_clickable_elements({}) - List all visible clickable buttons/links`,
     solve_captcha: `solve_captcha({}) - Read and return CAPTCHA text using vision AI`,
     handle_dialog: `handle_dialog({ "action": "accept"|"dismiss", "promptText": "text" }) - Accept or dismiss browser popup dialog`,
-    wait_for_payment: `wait_for_payment({}) - Wait 2 minutes for payment completion after QR scan or UPI submit`,
+    wait_for_payment: `wait_for_payment({}) - Wait 3 minutes for payment completion after QR scan or UPI submit`,
     scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`
   };
 
@@ -558,7 +558,7 @@ PAYMENT GATEWAY vs PAYMENT METHOD:
      * ⚠️ CRITICAL: QR is NOT visible yet! You MUST click buttons to reveal it!
      * Click "Make Payment" button → Click "Proceed" on dialog → Click "Show QR" button
      * ONLY AFTER clicking all buttons, use scan_upi_qr_code tool to extract QR URL
-     * Use wait_for_payment tool (2 minutes)
+      * Use wait_for_payment tool (3 minutes)
    - If user mentions "UPI ID" or "enter UPI":
      * First use select_payment_option({ paymentMethodName: "UPI" }) to switch to UPI tab
      * IMPORTANT: After UPI tab opens, check if there are UPI APP OPTIONS (radio buttons)
@@ -567,7 +567,7 @@ PAYMENT GATEWAY vs PAYMENT METHOD:
      * Example: select_payment_option({ paymentMethodName: "GooglePay" })
      * ONLY AFTER clicking the app radio, then fill UPI ID field (if required)
      * Then click Pay button
-     * Use wait_for_payment tool (2 minutes)
+      * Use wait_for_payment tool (3 minutes)
 
 UPI WORKFLOW WITH APP SELECTION:
 Step 1: select_payment_option({ paymentMethodName: "UPI" }) → Opens UPI tab
@@ -652,9 +652,9 @@ PAYMENT WAITING:
 
 - After QR scan (scan_upi_qr_code) OR after entering UPI ID and clicking Pay, you MUST use wait_for_payment tool
 - wait_for_payment will:
-  * Wait exactly 2 minutes without any navigation or page reload
+  * Wait exactly 3 minutes without any navigation or page reload
   * Stay on the current page (page will automatically redirect to success if payment completes)
-  * After 2 minutes, take ONE screenshot and check for success/failure
+  * After 3 minutes, take ONE screenshot and check for success/failure
 - Do NOT manually check for success - let wait_for_payment handle it
 - Do NOT navigate or reload the page after initiating payment
 - wait_for_payment will return success/failure/unclear status

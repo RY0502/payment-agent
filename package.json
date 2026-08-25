@@ -12,6 +12,7 @@
     "clean": "rm -rf dist",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
+    "start:prod": "node dist/server.js",
     "server": "tsx src/server.ts",
     "test-payment": "tsx src/index.ts",
     "payment": "tsx src/example.ts",

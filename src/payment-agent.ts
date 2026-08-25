@@ -95,7 +95,7 @@ function formatToolsDocumentation(toolsList: any[]): string {
     list_clickable_elements: `list_clickable_elements({}) - List all visible clickable buttons/links`,
     solve_captcha: `solve_captcha({}) - Read and return CAPTCHA text using vision AI`,
     handle_dialog: `handle_dialog({ "action": "accept"|"dismiss", "promptText": "text" }) - Accept or dismiss browser popup dialog`,
-    wait_for_payment: `wait_for_payment({}) - Wait 5 minutes for payment completion after QR scan or UPI submit`,
+    wait_for_payment: `wait_for_payment({}) - Wait 3 minutes for payment completion after QR scan or UPI submit`,
     scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`
   };
 
