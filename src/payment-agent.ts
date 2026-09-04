@@ -1,15 +1,10 @@
 import { StateGraph, END, START, Annotation } from "@langchain/langgraph";
-import {
-  FreeTierOrchestrator,
-  createTextProviders,
-  type Provider,
-  type LlmInput,
-} from "@freetier/orchestrator";
 import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 import { createPaymentTools } from "./payment-tools.js";
 import { PaymentData } from "./types.js";
+import { TextChatClient } from "./text-chat.js";
 
 const MAX_ATTEMPTS_PER_STEP = 5;
 
@@ -69,18 +64,6 @@ const PaymentStateAnnotation = Annotation.Root({
 });
 
 type PaymentState = typeof PaymentStateAnnotation.State;
-
-const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
-
-function buildTextOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
-  const providers: Provider<LlmInput, string>[] = createTextProviders();
-  const ordered = [...providers].sort((a, b) => {
-    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(a.name);
-    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(b.name);
-    return (rankA === -1 ? TEXT_PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? TEXT_PROVIDER_PRIORITY.length : rankB);
-  });
-  return new FreeTierOrchestrator<LlmInput, string>(ordered);
-}
 
 function formatToolsDocumentation(toolsList: any[]): string {
   const descriptions: Record<string, string> = {
@@ -220,14 +203,14 @@ function parseModelToolResponse(responseText: string): { thought: string; toolCa
 export class PaymentReActAgent {
   private browser: BrowserManager;
   private vision: VisionAnalyzer;
-  private textOrchestrator: FreeTierOrchestrator<LlmInput, string>;
+  private textChat: TextChatClient;
   private tools: any[];
   private graph: any;
 
   constructor(_apiKey?: string) {
     this.browser = new BrowserManager();
     this.vision = new VisionAnalyzer();
-    this.textOrchestrator = buildTextOrchestrator();
+    this.textChat = new TextChatClient();
     this.tools = createPaymentTools(this.browser, this.vision);
     this.graph = this.buildGraph();
   }
@@ -287,7 +270,7 @@ Current attempt: ${state.attemptCount + 1}/${state.maxAttempts}`;
     const conversationHistory = formatConversationHistory(state.messages);
     const agentPrompt = `CONVERSATION HISTORY AND CURRENT STATE:\n${conversationHistory}\n\nDetermine your next action. Respond with JSON:`;
 
-    const responseText = await this.textOrchestrator.invoke({
+    const responseText = await this.textChat.invoke({
       system: systemPrompt,
       prompt: agentPrompt,
     });

@@ -12,18 +12,13 @@
 
 import "dotenv/config";
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import {
-  FreeTierOrchestrator,
-  createTextProviders,
-  type Provider,
-  type LlmInput,
-} from "@freetier/orchestrator";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 import { createPaymentTools } from "./payment-tools.js";
 import { PaymentData } from "./types.js";
 import { EmailService } from "./email-service.js";
+import { TextChatClient } from "./text-chat.js";
 
 const MAX_ATTEMPTS_PER_STEP = 50;
 
@@ -72,22 +67,10 @@ const PaymentStateAnnotation = Annotation.Root({
 
 type PaymentState = typeof PaymentStateAnnotation.State;
 
-const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
-
-function buildTextOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
-  const providers: Provider<LlmInput, string>[] = createTextProviders();
-  const ordered = [...providers].sort((a, b) => {
-    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(a.name);
-    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(b.name);
-    return (rankA === -1 ? TEXT_PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? TEXT_PROVIDER_PRIORITY.length : rankB);
-  });
-  return new FreeTierOrchestrator<LlmInput, string>(ordered);
-}
-
 let browser: BrowserManager | null = null;
 let vision: VisionAnalyzer | null = null;
 let tools: any[] = [];
-let textOrchestrator: FreeTierOrchestrator<LlmInput, string> | null = null;
+let textChat: TextChatClient | null = null;
 let currentPaymentData: any = null;
 
 /**
@@ -262,7 +245,7 @@ async function clearAgentState() {
   browser = null;
   vision = null;
   tools = [];
-  textOrchestrator = null;
+  textChat = null;
   // Note: NOT clearing currentPaymentData here - it will be updated in ensureInitialized
   
   // Clear any timeout trackers
@@ -292,8 +275,8 @@ async function ensureInitialized(paymentData?: any) {
   } else {
     console.log('🔍 Tools already exist, currentPaymentData:', JSON.stringify(currentPaymentData));
   }
-  if (!textOrchestrator) {
-    textOrchestrator = buildTextOrchestrator();
+  if (!textChat) {
+    textChat = new TextChatClient();
   }
 }
 
@@ -425,7 +408,7 @@ User message: ${messageContent}
 Return ONLY the JSON object, no other text.`;
 
       try {
-        const extractedText = await textOrchestrator!.invoke({
+        const extractedText = await textChat!.invoke({
           system: "You are a data extraction expert. Return ONLY valid JSON.",
           prompt: extractionPrompt,
         });
@@ -740,7 +723,7 @@ Based on the conversation history, observations, and instructions above, determi
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const responseText = await textOrchestrator!.invoke({
+      const responseText = await textChat!.invoke({
         system: fullSystemPrompt,
         prompt: agentPrompt,
       });

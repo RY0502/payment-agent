@@ -34,6 +34,10 @@ HEADLESS=true
 HOST=0.0.0.0
 PORT=8123
 GROQ_API_KEY=replace-me
+# Set to "orchestrator" to restore the current free-tier text-chat flow.
+TEXT_CHAT_PROVIDER=groq
+# Optional; defaults to the historical direct Groq model.
+GROQ_TEXT_MODEL=llama-3.3-70b-versatile
 ```
 
 Add the optional Mailgun, push notification, and provider failover variables from `.env.example` as needed. Do not commit `.env` or log complete payment data.
