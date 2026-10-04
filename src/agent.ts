@@ -580,6 +580,13 @@ Step 5: click_button → Click "Make Payment"
 ⚠️ Do NOT skip the radio button click - it's required to show the correct input fields!
 
 REAL EXAMPLE - BSES PAYMENT WITH BILLDESK + UPI + GOOGLEPAY:
+Step 1: Navigate to https://www.bsesdelhi.com/web/brpl/quick-pay
+Step 2: Enter CA number and solve CAPTCHA, then click "quick pay"
+Step 3: ⚠️ BSES VERIFICATION SCREEN: The browser navigates to "https://www.bsesdelhi.com/web/brpl/verify-quickpay".
+        You will see consumer verification details (CA No, Mobile No, Email) and a "Next" button in the center.
+        (IGNORE the sidebar on the left which has an empty quick-pay widget).
+        Execute: click_button({ buttonDescription: "Next" })
+Step 4: analyze_current_page (see BSES page with payment gateway options)
 Step 5: "Select BillDesk option under Payment gateway and click Pay now"
   → analyze_current_page (see BSES page with payment gateway options)
   → select_payment_option({ paymentMethodName: "BillDesk" })
@@ -681,15 +688,11 @@ DIALOG/POPUP HANDLING:
 - Example: handle_dialog with action="accept" to confirm a dialog
 
 FORM RESUBMISSION HANDLING:
-- Some websites (like BSES) may reload the form with empty fields after first submission
-- This is normal behavior - it's a validation retry mechanism
-- If you see the SAME form page again with empty fields and new CAPTCHA:
-  * This means first submission failed (validation/session issue)
-  * Simply re-fill the form fields again
-  * Solve the new CAPTCHA
-  * Click the button again
-- Usually succeeds on 2nd attempt
-- Don't give up - retry the form if you see it reload
+- Some websites may reload the initial form with empty fields after first submission IF AND ONLY IF the URL is still the initial submission URL (e.g., https://www.bsesdelhi.com/web/brpl/quick-pay).
+- ⚠️ CRITICAL FOR BSES: If the URL is "https://www.bsesdelhi.com/web/brpl/verify-quickpay", this is NOT a form reload - you successfully moved to the verification screen! You will see CA No, Mobile No, Email, and a "Next" button in the center. (Ignore the sidebar on the left).
+  * Do NOT re-fill any CA number!
+  * Do NOT solve any CAPTCHA!
+  * Click the "Next" button using click_button({ buttonDescription: "Next" })!
 
 EXAMPLE FLOW:
 Page 1: See "CA Number" field → Fill it → Solve CAPTCHA → Fill it → Click "Proceed"

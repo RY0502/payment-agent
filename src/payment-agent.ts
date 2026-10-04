@@ -344,8 +344,36 @@ Current attempt: ${state.attemptCount + 1}/${state.maxAttempts}`;
 
   private async checkSuccessNode(_state: PaymentState) {
     try {
-      const screenshot = await this.browser.captureScreenshot();
       const pageText = await this.browser.getPageText();
+      const currentUrl = (await this.browser.getCurrentUrl()).toLowerCase();
+
+      // Quick filter: Skip expensive screenshot + vision detection on pages that cannot possibly be payment success confirmations
+      const nonSuccessUrlKeywords = ['verify-quickpay', 'quick-pay', 'home', 'login', 'registration', 'appointment'];
+      const isPrePaymentUrl = nonSuccessUrlKeywords.some((u) => currentUrl.includes(u));
+
+      const lowerText = pageText.toLowerCase();
+      const successKeywords = [
+        "payment successful",
+        "payment success",
+        "transaction successful",
+        "payment received",
+        "payment status: success",
+        "payment status : success",
+        "paid successfully",
+        "transaction reference number",
+        "receipt for payment",
+        "payment acknowledgement",
+      ];
+      const hasSuccessText = successKeywords.some((kw) => lowerText.includes(kw));
+
+      if (isPrePaymentUrl || !hasSuccessText) {
+        return {
+          isPaymentComplete: false,
+        };
+      }
+
+      // If we see clear success signals in text/URL, confirm with Vision and capture confirmation screenshot
+      const screenshot = await this.browser.captureScreenshot();
       const isSuccess = await this.vision.detectPaymentSuccess(screenshot, pageText);
 
       if (isSuccess) {

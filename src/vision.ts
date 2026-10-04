@@ -10,7 +10,7 @@ import { VisionAnalysisResult } from "./types.js";
  * Preferred provider failover order for vision calls.
  * Providers without a configured API key are automatically skipped by createProviders().
  */
-const PROVIDER_PRIORITY = ["Cloudflare", "NVIDIA", "Groq"];
+const PROVIDER_PRIORITY = ["NVIDIA", "Cloudflare", "Groq"];
 
 function buildOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
   const providers: Provider<LlmInput, string>[] = createProviders();
@@ -62,7 +62,7 @@ Respond in JSON format:
       prompt,
       imageBase64: screenshot,
     });
-    
+
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -191,7 +191,7 @@ Respond with JSON:
       prompt,
       imageBase64: screenshot,
     });
-    
+
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {

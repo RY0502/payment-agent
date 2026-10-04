@@ -48,4 +48,7 @@ export interface VisionAnalysisResult {
   isPaymentSuccessPage: boolean;
   reasoning: string;
   hasCaptcha?: boolean;
+  visibleButtons?: string[];
+  visibleFields?: string[];
 }
+

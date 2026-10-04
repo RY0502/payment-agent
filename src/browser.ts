@@ -208,6 +208,18 @@ export class BrowserManager {
       await this.page.goto(url, { waitUntil: "load", timeout: 60000 });
       await this.page.waitForTimeout(3000);
     }
+
+    // Auto-dismiss cookie consent banner / overlay if present
+    try {
+      const cookieBtn = this.page.locator('#bsesAcceptCookiesBtn:visible, button:has-text("Accept all cookies"):visible, button:has-text("Accept Cookies"):visible');
+      if (await cookieBtn.count() > 0) {
+        console.log('🍪 Auto-dismissing cookie consent modal...');
+        await cookieBtn.first().click({ timeout: 3000 }).catch(() => {});
+        await this.page.waitForTimeout(1000);
+      }
+    } catch (cookieErr) {
+      console.warn('Cookie banner dismissal check warning:', cookieErr);
+    }
   }
 
   async captureScreenshot(): Promise<string> {

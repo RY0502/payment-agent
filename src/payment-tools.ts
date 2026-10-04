@@ -30,72 +30,46 @@ export function createPaymentTools(
   const analyzeCurrentPage = tool(
     async ({ paymentData, currentStep }) => {
       try {
+        const page = browser.getPage();
+        if (page) {
+          try {
+            const cookieBtn = page.locator('#bsesAcceptCookiesBtn:visible, button:has-text("Accept all cookies"):visible');
+            if (await cookieBtn.count() > 0) {
+              console.log('🍪 Dismissing cookie consent overlay before page analysis...');
+              await cookieBtn.first().click({ timeout: 2000 }).catch(() => {});
+              await page.waitForTimeout(500);
+            }
+          } catch {}
+        }
+
         const screenshot = await browser.captureScreenshot();
         const currentUrl = await browser.getCurrentUrl();
         const pageText = await browser.getPageText();
 
-        // Use dedicated CAPTCHA detection for better accuracy
-        console.log('Checking for CAPTCHA presence...');
-        let hasCaptcha = await vision.detectCaptcha(screenshot);
-        console.log(`Vision model CAPTCHA detected: ${hasCaptcha}`);
+        // Check for CAPTCHA in DOM using Playwright's native locator engine (avoids __name issues in page.evaluate)
+        let hasCaptcha = false;
+        const isVerifyQuickPay = currentUrl.toLowerCase().includes('verify-quickpay');
 
-        // If vision detected a CAPTCHA, verify against the DOM to eliminate false positives
-        if (hasCaptcha) {
-          const page = browser.getPage();
-          if (page) {
-            try {
-              const domHasCaptcha = await page.evaluate(() => {
-                const isVisible = (el: HTMLElement) => {
-                  const style = window.getComputedStyle(el);
-                  const rect = el.getBoundingClientRect();
-                  return (
-                    style.display !== 'none' &&
-                    style.visibility !== 'hidden' &&
-                    style.opacity !== '0' &&
-                    rect.width > 0 &&
-                    rect.height > 0
-                  );
-                };
-
-                // Check for CAPTCHA input fields
-                const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(
-                  'input[name*="captcha" i], input[id*="captcha" i], input[placeholder*="captcha" i], ' +
-                  'input[name*="code" i], input[id*="code" i], input[name*="verify" i], input[id*="verify" i]'
-                ));
-                const visibleInput = inputs.some((el) => {
-                  const nameOrId = ((el.name || '') + ' ' + (el.id || '')).toLowerCase();
-                  // Avoid false matches on postal code / promo code / pin code
-                  if (nameOrId.includes('zip') || nameOrId.includes('pin') || nameOrId.includes('postal') || nameOrId.includes('promo') || nameOrId.includes('coupon')) {
-                    return false;
-                  }
-                  return isVisible(el);
-                });
-                if (visibleInput) return true;
-
-                // Check for CAPTCHA images
-                const images = Array.from(document.querySelectorAll<HTMLImageElement>(
-                  'img[src*="captcha" i], img[alt*="captcha" i], img[id*="captcha" i], img[class*="captcha" i]'
-                ));
-                if (images.some(isVisible)) return true;
-
-                // Check for third-party challenge iframes (Cloudflare Turnstile, reCAPTCHA, hCaptcha)
-                const iframes = Array.from(document.querySelectorAll<HTMLIFrameElement>(
-                  'iframe[src*="recaptcha" i], iframe[src*="turnstile" i], iframe[src*="hcaptcha" i], iframe[src*="challenges.cloudflare" i]'
-                ));
-                if (iframes.some(isVisible)) return true;
-
-                return false;
-              });
-
-              if (!domHasCaptcha) {
-                console.log('⚠️ Vision model reported CAPTCHA, but no visible CAPTCHA element found in DOM. Disregarding false positive.');
-                hasCaptcha = false;
-              } else {
-                console.log('✅ DOM verified visible CAPTCHA element is present.');
-              }
-            } catch (domError) {
-              console.warn('DOM CAPTCHA verification warning:', domError);
+        if (page) {
+          try {
+            if (isVerifyQuickPay) {
+              // On the verification page, the main content is CA confirmation, not a new captcha
+              hasCaptcha = false;
+            } else {
+              const captchaSelectors = [
+                'input[name*="captchaText" i]:visible',
+                'input[id*="captchaText" i]:visible',
+                'img[src*="captcha" i]:visible',
+                'iframe[src*="recaptcha" i]:visible',
+                'iframe[src*="turnstile" i]:visible',
+                'iframe[src*="hcaptcha" i]:visible',
+              ];
+              const captchaMatches = await page.locator(captchaSelectors.join(', ')).count();
+              hasCaptcha = captchaMatches > 0;
             }
+            console.log(`DOM CAPTCHA detection result: ${hasCaptcha}`);
+          } catch (domError) {
+            console.warn('DOM CAPTCHA verification warning:', domError);
           }
         }
 
@@ -108,13 +82,49 @@ export function createPaymentTools(
         // Override hasCaptcha with verified detection result
         analysis.hasCaptcha = hasCaptcha;
 
-        console.log(`Page analysis complete. hasCaptcha: ${hasCaptcha}`);
+        // Collect visible buttons on the page to provide unambiguous action targets
+        let visibleButtons: string[] = [];
+        try {
+          const buttonTexts = await page?.locator('button:visible, input[type="submit"]:visible, a.btn:visible, [role="button"]:visible').allInnerTexts() || [];
+          visibleButtons = buttonTexts
+            .map(t => t.trim().replace(/[>→»›<←«‹\r\n\t]/g, '').trim())
+            .filter(t => t.length > 0 && t.length < 35);
+          visibleButtons = Array.from(new Set(visibleButtons));
+        } catch {}
+
+        // Special handling for BSES Verify QuickPay page
+        if (isVerifyQuickPay) {
+          analysis.pageType = "verification";
+          analysis.suggestedAction = "Click the 'Next' button to proceed to the payment gateway selection screen. Do NOT re-fill the CA number or CAPTCHA.";
+          if (!visibleButtons.includes("Next")) {
+            visibleButtons.unshift("Next");
+          }
+          analysis.visibleButtons = visibleButtons;
+        } else if (visibleButtons.length > 0) {
+          analysis.visibleButtons = visibleButtons;
+        }
+
+        // Extract meaningful page text (prioritizing main content if available)
+        let meaningfulText = '';
+        try {
+          const mainContent = page?.locator('#main-content, main, [role="main"]').first();
+          if (mainContent && (await mainContent.count()) > 0) {
+            meaningfulText = (await mainContent.innerText()).substring(0, 3000);
+          }
+        } catch {}
+        if (!meaningfulText) {
+          meaningfulText = pageText.substring(0, 3000);
+        }
+
+        console.log(`Page analysis complete. URL: ${currentUrl}, pageType: ${analysis.pageType}, hasCaptcha: ${hasCaptcha}, buttons: ${visibleButtons.join(', ')}`);
 
         return JSON.stringify({
           url: currentUrl,
-          pageText: pageText.substring(0, 500),
+          pageType: analysis.pageType,
+          pageText: meaningfulText,
           analysis,
           hasCaptcha,
+          visibleButtons,
         }, null, 2);
       } catch (error) {
         return `Failed to analyze page: ${error}`;
@@ -140,73 +150,123 @@ export function createPaymentTools(
 
         console.log(`🔍 Looking for field: "${fieldDescription}" to fill with value: "${value}"`);
 
-        // Strategy 1: Try exact placeholder match first (most reliable)
+        // Auto-dismiss cookie banner if present and blocking fields
         try {
-          await page.getByPlaceholder(fieldDescription, { exact: false }).fill(value, { timeout: 3000 });
-          console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder`);
-          return `Successfully filled "${fieldDescription}" using exact placeholder`;
+          const cookieBtn = page.locator('#bsesAcceptCookiesBtn:visible, button:has-text("Accept all cookies"):visible');
+          if (await cookieBtn.count() > 0) {
+            await cookieBtn.first().click({ timeout: 1000 }).catch(() => {});
+            await page.waitForTimeout(500);
+          }
+        } catch {}
+
+        // Strategy 0: Direct match for CA Number / Account Number on BSES & Utility sites (visible only)
+        if (/ca.*number|account.*number|^ca$|^account$/i.test(fieldDescription.trim())) {
+          console.log(`🎯 Strategy 0: Direct utility CA/Account Number matching (visible only)`);
+          const currentUrl = page.url().toLowerCase();
+          if (currentUrl.includes('verify-quickpay')) {
+            return `You are on the verification screen (verify-quickpay). CA Number ${value} is already verified and confirmed. Please proceed to click the "Next" button.`;
+          }
+
+          const caLocator = page.locator([
+            'input[id*="accountNumber" i]:visible',
+            'input[placeholder*="CA Number" i]:visible',
+            'input[name*="accountNumber" i]:visible',
+            'input[title*="account-number" i]:visible'
+          ].join(', '));
+          
+          if (await caLocator.count() > 0) {
+            await caLocator.first().fill(value, { timeout: 3000 });
+            console.log(`✅ Filled CA/Account number = "${value}"`);
+            return `Successfully filled account number: ${value}`;
+          }
+        }
+
+        // Strategy 1: Try exact placeholder match first - visible only, taking first visible to avoid strict mode violations
+        try {
+          const locator = page.getByPlaceholder(fieldDescription, { exact: false }).locator('visible=true');
+          if (await locator.count() > 0) {
+            await locator.first().fill(value, { timeout: 3000 });
+            console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder`);
+            return `Successfully filled "${fieldDescription}" using exact placeholder`;
+          }
         } catch (e1) {
           console.log(`❌ Strategy 1 (placeholder) failed`);
           // Continue to next strategy
         }
 
-        // Strategy 2: Try by placeholder with partial match
+        // Strategy 2: Try by placeholder with partial match - visible only
         try {
           const keywords = fieldDescription.toLowerCase().split(' ');
           const regexPattern = keywords.join('.*');
-          await page.getByPlaceholder(new RegExp(regexPattern, 'i')).fill(value, { timeout: 3000 });
-          console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder regex`);
-          return `Successfully filled "${fieldDescription}" using placeholder regex`;
+          const locator = page.getByPlaceholder(new RegExp(regexPattern, 'i')).locator('visible=true');
+          if (await locator.count() > 0) {
+            await locator.first().fill(value, { timeout: 3000 });
+            console.log(`✅ Filled "${fieldDescription}" = "${value}" using placeholder regex`);
+            return `Successfully filled "${fieldDescription}" using placeholder regex`;
+          }
         } catch (e2) {
           console.log(`❌ Strategy 2 (placeholder regex) failed`);
           // Continue to next strategy
         }
 
-        // Strategy 3: Try by label with partial match
+        // Strategy 3: Try by label with partial match - visible only
         try {
           const keywords = fieldDescription.toLowerCase().split(' ');
           const regexPattern = keywords.join('.*');
-          await page.getByLabel(new RegExp(regexPattern, 'i')).fill(value, { timeout: 3000 });
-          console.log(`✅ Filled "${fieldDescription}" = "${value}" using label`);
-          return `Successfully filled "${fieldDescription}" using label`;
+          const locator = page.getByLabel(new RegExp(regexPattern, 'i')).locator('visible=true');
+          if (await locator.count() > 0) {
+            await locator.first().fill(value, { timeout: 3000 });
+            console.log(`✅ Filled "${fieldDescription}" = "${value}" using label`);
+            return `Successfully filled "${fieldDescription}" using label`;
+          }
         } catch (e3) {
           console.log(`❌ Strategy 3 (label) failed`);
           // Continue to next strategy
         }
 
-        // Strategy 3: Try by role with name
+        // Strategy 3b: Try by role with name - visible only
         try {
-          await page.getByRole('textbox', { name: new RegExp(fieldDescription, 'i') }).fill(value, { timeout: 3000 });
-          return `Successfully filled "${fieldDescription}" using role`;
-        } catch (e3) {
+          const locator = page.getByRole('textbox', { name: new RegExp(fieldDescription, 'i') }).locator('visible=true');
+          if (await locator.count() > 0) {
+            await locator.first().fill(value, { timeout: 3000 });
+            return `Successfully filled "${fieldDescription}" using role`;
+          }
+        } catch (e3b) {
           // Continue to next strategy
         }
 
         // Strategy 4: Try text locator for associated label
         try {
-          const labelLocator = page.locator(`text=${fieldDescription}`);
-          const inputLocator = labelLocator.locator('..').locator('input, textarea').first();
-          await inputLocator.fill(value, { timeout: 3000 });
-          return `Successfully filled "${fieldDescription}" using text locator`;
+          const labelLocator = page.locator(`text=${fieldDescription}:visible`);
+          if (await labelLocator.count() > 0) {
+            const inputLocator = labelLocator.first().locator('..').locator('input:visible, textarea:visible').first();
+            await inputLocator.fill(value, { timeout: 3000 });
+            return `Successfully filled "${fieldDescription}" using text locator`;
+          }
         } catch (e4) {
           // Continue to next strategy
         }
 
         // Strategy 5: Try finding input near text
         try {
-          await page.locator(`input:near(:text("${fieldDescription}"))`).first().fill(value, { timeout: 3000 });
+          const nearLocator = page.locator(`input:visible:near(:text("${fieldDescription}"))`).first();
+          await nearLocator.fill(value, { timeout: 3000 });
           return `Successfully filled "${fieldDescription}" using proximity locator`;
         } catch (e5) {
           // Continue to next strategy
         }
 
-        // Strategy 6: Try by name attribute (case-insensitive partial match)
+        // Strategy 6: Try by name attribute (visible only)
         try {
           const keywords = fieldDescription.toLowerCase().split(' ');
           for (const keyword of keywords) {
+            if (!keyword || keyword.length < 2) continue;
             try {
-              await page.locator(`input[name*="${keyword}" i], textarea[name*="${keyword}" i]`).first().fill(value, { timeout: 2000 });
-              return `Successfully filled "${fieldDescription}" using name attribute`;
+              const locator = page.locator(`input[name*="${keyword}" i]:visible, textarea[name*="${keyword}" i]:visible`);
+              if (await locator.count() > 0) {
+                await locator.first().fill(value, { timeout: 2000 });
+                return `Successfully filled "${fieldDescription}" using name attribute`;
+              }
             } catch {
               continue;
             }
@@ -215,13 +275,17 @@ export function createPaymentTools(
           // Continue to next strategy
         }
 
-        // Strategy 7: Try by id attribute (case-insensitive partial match)
+        // Strategy 7: Try by id attribute (visible only)
         try {
           const keywords = fieldDescription.toLowerCase().split(' ');
           for (const keyword of keywords) {
+            if (!keyword || keyword.length < 2) continue;
             try {
-              await page.locator(`input[id*="${keyword}" i], textarea[id*="${keyword}" i]`).first().fill(value, { timeout: 2000 });
-              return `Successfully filled "${fieldDescription}" using id attribute`;
+              const locator = page.locator(`input[id*="${keyword}" i]:visible, textarea[id*="${keyword}" i]:visible`);
+              if (await locator.count() > 0) {
+                await locator.first().fill(value, { timeout: 2000 });
+                return `Successfully filled "${fieldDescription}" using id attribute`;
+              }
             } catch {
               continue;
             }
@@ -233,14 +297,21 @@ export function createPaymentTools(
         // Strategy 8: Try direct CSS selector for visible text inputs
         try {
           const inputs = await page.locator('input[type="text"]:visible, input:not([type]):visible, textarea:visible').all();
+          const cleanDesc = fieldDescription.toLowerCase().replace(/[-_]/g, ' ');
           for (const input of inputs) {
-            const placeholder = await input.getAttribute('placeholder');
-            const label = await input.getAttribute('aria-label');
-            const title = await input.getAttribute('title');
+            const placeholder = (await input.getAttribute('placeholder'))?.toLowerCase() || '';
+            const label = (await input.getAttribute('aria-label'))?.toLowerCase() || '';
+            const title = (await input.getAttribute('title'))?.toLowerCase().replace(/[-_]/g, ' ') || '';
+            const name = (await input.getAttribute('name'))?.toLowerCase().replace(/[-_]/g, ' ') || '';
+            const id = (await input.getAttribute('id'))?.toLowerCase().replace(/[-_]/g, ' ') || '';
             
-            if (placeholder?.toLowerCase().includes(fieldDescription.toLowerCase()) ||
-                label?.toLowerCase().includes(fieldDescription.toLowerCase()) ||
-                title?.toLowerCase().includes(fieldDescription.toLowerCase())) {
+            if (placeholder.includes(cleanDesc) ||
+                label.includes(cleanDesc) ||
+                title.includes(cleanDesc) ||
+                name.includes(cleanDesc) ||
+                id.includes(cleanDesc) ||
+                (placeholder.length > 2 && cleanDesc.includes(placeholder)) ||
+                (title.length > 2 && cleanDesc.includes(title))) {
               await input.fill(value);
               return `Successfully filled "${fieldDescription}" using direct selector match`;
             }
@@ -272,25 +343,84 @@ export function createPaymentTools(
           return `Failed to click button: Browser page not available`;
         }
 
-        // Pre-strategy: Wait for dynamic content to load (especially for Vercel/sparticuz)
-        console.log(`⏳ Waiting for dynamic content to load: "${buttonDescription}"`);
+        // Clean description to handle common visual artifacts like chevrons and trailing symbols (e.g., "Next >" -> "Next")
+        const cleanDescription = buttonDescription.replace(/[>→»›<←«‹\t\r\n]/g, ' ').replace(/\s+/g, ' ').trim();
+        const searchTerms = Array.from(new Set([cleanDescription, buttonDescription.trim()])).filter(Boolean);
+
+        // Pre-strategy: Wait for dynamic content to load, checking cleaned description or original
+        console.log(`⏳ Waiting for dynamic content to load: "${cleanDescription}" (original: "${buttonDescription}")`);
         try {
           await page.waitForFunction(
-            (text) => {
+            (terms) => {
               const pageText = document.body.innerText.toLowerCase();
-              return pageText.includes(text.toLowerCase());
+              return terms.some(t => pageText.includes(t.toLowerCase()));
             },
-            buttonDescription,
-            { timeout: 10000 }
+            searchTerms,
+            { timeout: 3000 }
           );
-          console.log(`✅ Dynamic content loaded: "${buttonDescription}"`);
+          console.log(`✅ Dynamic content check passed for "${cleanDescription}"`);
         } catch (waitError) {
-          console.log(`⚠️ Content wait timeout, proceeding anyway: ${waitError}`);
+          console.log(`⚠️ Content wait timeout/bypassed, proceeding directly to button locators...`);
+        }
+
+        // On BSES verify-quickpay page, if the request is "quick pay", redirect to "Next" button
+        const currentUrl = page.url().toLowerCase();
+        let targetDescription = cleanDescription;
+        if (currentUrl.includes('verify-quickpay') && /quick.*pay/i.test(cleanDescription)) {
+          const nextBtn = page.locator('button:has-text("Next"):visible, button[id*="next" i]:visible');
+          if (await nextBtn.count() > 0) {
+            console.log(`⚠️ On verify-quickpay page: redirecting "quick pay" to primary "Next" button`);
+            targetDescription = "Next";
+          }
+        }
+
+        // Strategy 0: Direct visible element locator matching text, id, or name (e.g. Next button on BSES)
+        try {
+          console.log(`🔍 Strategy 0: Direct locator for visible button matching "${targetDescription}"`);
+          const directSelectors = [
+            `button:has-text("${targetDescription}"):visible`,
+            `button[id*="${targetDescription}" i]:visible`,
+            `button[name*="${targetDescription}" i]:visible`,
+            `input[type="submit"][value*="${targetDescription}" i]:visible`,
+            `input[type="button"][value*="${targetDescription}" i]:visible`,
+            `a:has-text("${targetDescription}"):visible`,
+            `[role="button"]:has-text("${targetDescription}"):visible`,
+          ];
+          const directLocator = page.locator(directSelectors.join(', '));
+          const directCount = await directLocator.count();
+          if (directCount > 0) {
+            console.log(`Found ${directCount} direct visible element(s) matching "${targetDescription}"`);
+            const element = directLocator.first();
+
+            // Wait for any loaders to disappear
+            try {
+              await page.waitForSelector('.Loader_preloader__2jBNF, [class*="loader"], [class*="spinner"]', { state: 'hidden', timeout: 3000 });
+            } catch (loaderError) {}
+
+            try {
+              await element.click({ timeout: 3000 });
+              console.log(`✅ Clicked button matching "${targetDescription}" using Strategy 0`);
+            } catch (clickError) {
+              console.log(`Strategy 0 click failed, using JavaScript click`);
+              await element.evaluate((el: any) => (el as HTMLElement).click());
+              console.log(`✅ Clicked button matching "${targetDescription}" using Strategy 0 JS click`);
+            }
+
+            try {
+              await browser.waitForNavigation();
+              await page.waitForTimeout(2000);
+            } catch (navError) {
+              await page.waitForTimeout(2000);
+            }
+            return `Successfully clicked "${buttonDescription}" button`;
+          }
+        } catch (e0) {
+          console.log(`Strategy 0 failed: ${e0}`);
         }
 
         // Strategy 1: Try by role with regex name (partial match)
         try {
-          const keywords = buttonDescription.toLowerCase().split(' ');
+          const keywords = targetDescription.toLowerCase().split(' ').filter(Boolean);
           const regexPattern = keywords.join('.*');
           console.log(`🔍 Strategy 1: Looking for button with pattern: ${regexPattern}`);
           const buttonLocator = page.getByRole('button', { name: new RegExp(regexPattern, 'i') });
@@ -334,8 +464,8 @@ export function createPaymentTools(
 
         // Strategy 1b: Try with text locator
         try {
-          console.log(`🔍 Strategy 1b: Looking for button with text: ${buttonDescription}`);
-          const textLocator = page.locator(`text=${buttonDescription}`);
+          console.log(`🔍 Strategy 1b: Looking for button with text: ${cleanDescription}`);
+          const textLocator = page.locator(`text=${cleanDescription}`);
           const count = await textLocator.count();
           console.log(`Found ${count} element(s) with text`);
           
@@ -372,9 +502,9 @@ export function createPaymentTools(
 
         // Strategy 1c: Try finding any clickable element with text (generic approach for divs, buttons, spans, etc.)
         try {
-          console.log(`🔍 Strategy 1c: Looking for any clickable element with text: ${buttonDescription}`);
+          console.log(`🔍 Strategy 1c: Looking for any clickable element with text: ${cleanDescription}`);
           // Look for any element that contains the text (case-insensitive)
-          const clickableLocator = page.locator(`text=/${buttonDescription}/i`).first();
+          const clickableLocator = page.locator(`text=/${cleanDescription}/i`).first();
           const count = await clickableLocator.count();
           console.log(`Found ${count} element(s) with text`);
           
@@ -554,10 +684,11 @@ export function createPaymentTools(
         // Strategy 6: Last resort - dispatch full mouse event sequence at element's screen coordinates
         // Needed for modal dialogs, onclick handlers, and elements that require the mousedown→mouseup→click sequence
         try {
-          console.log(`🔍 Strategy 6: Full mouse event dispatch for: "${buttonDescription}"`);
-          const dispatched = await page.evaluate((description: string) => {
+          console.log(`🔍 Strategy 6: Full mouse event dispatch for: "${cleanDescription}" (original: "${buttonDescription}")`);
+          const dispatched = await page.evaluate(({ description, clean }: { description: string; clean: string }) => {
             const normalize = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
             const target = normalize(description);
+            const targetClean = normalize(clean);
 
             const candidates = Array.from(
               document.querySelectorAll('button, a, [role="button"], input[type="submit"], input[type="button"], div, span')
@@ -568,7 +699,7 @@ export function createPaymentTools(
               const text = normalize((el as any).innerText || (el as any).getAttribute('aria-label') || (el as any).getAttribute('title') || ((el as any).value) || '');
               const idOrName = normalize(((el as any).id || '') + ' ' + ((el as any).getAttribute('name') || ''));
               if (!text && !idOrName) continue;
-              if (text.includes(target) || idOrName.includes(target.replace(/\s+/g, ''))) {
+              if (text.includes(targetClean) || text.includes(target) || idOrName.includes(targetClean.replace(/\s+/g, ''))) {
                 const rect = (el as any).getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0) {
                   best = el;
@@ -594,7 +725,7 @@ export function createPaymentTools(
             (best as any).dispatchEvent(new MouseEvent('mouseup', eventOpts));
             (best as any).dispatchEvent(new MouseEvent('click', eventOpts));
             return true;
-          }, buttonDescription);
+          }, { description: buttonDescription, clean: cleanDescription });
 
           if (dispatched) {
             console.log(`✅ Clicked "${buttonDescription}" using full mouse event dispatch (Strategy 6 - last resort)`);
@@ -780,6 +911,11 @@ export function createPaymentTools(
 
         // Wait for page to be ready
         await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+
+        const currentUrl = page.url().toLowerCase();
+        if (currentUrl.includes('verify-quickpay')) {
+          return `You are on the verification screen (verify-quickpay). There is no CAPTCHA on this screen. Please proceed directly to click the "Next" button.`;
+        }
         
         // Take screenshot and solve CAPTCHA directly
         const screenshot = await browser.captureScreenshot();
