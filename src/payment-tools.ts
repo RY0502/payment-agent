@@ -36,8 +36,68 @@ export function createPaymentTools(
 
         // Use dedicated CAPTCHA detection for better accuracy
         console.log('Checking for CAPTCHA presence...');
-        const hasCaptcha = await vision.detectCaptcha(screenshot);
-        console.log(`CAPTCHA detected: ${hasCaptcha}`);
+        let hasCaptcha = await vision.detectCaptcha(screenshot);
+        console.log(`Vision model CAPTCHA detected: ${hasCaptcha}`);
+
+        // If vision detected a CAPTCHA, verify against the DOM to eliminate false positives
+        if (hasCaptcha) {
+          const page = browser.getPage();
+          if (page) {
+            try {
+              const domHasCaptcha = await page.evaluate(() => {
+                const isVisible = (el: HTMLElement) => {
+                  const style = window.getComputedStyle(el);
+                  const rect = el.getBoundingClientRect();
+                  return (
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    style.opacity !== '0' &&
+                    rect.width > 0 &&
+                    rect.height > 0
+                  );
+                };
+
+                // Check for CAPTCHA input fields
+                const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(
+                  'input[name*="captcha" i], input[id*="captcha" i], input[placeholder*="captcha" i], ' +
+                  'input[name*="code" i], input[id*="code" i], input[name*="verify" i], input[id*="verify" i]'
+                ));
+                const visibleInput = inputs.some((el) => {
+                  const nameOrId = ((el.name || '') + ' ' + (el.id || '')).toLowerCase();
+                  // Avoid false matches on postal code / promo code / pin code
+                  if (nameOrId.includes('zip') || nameOrId.includes('pin') || nameOrId.includes('postal') || nameOrId.includes('promo') || nameOrId.includes('coupon')) {
+                    return false;
+                  }
+                  return isVisible(el);
+                });
+                if (visibleInput) return true;
+
+                // Check for CAPTCHA images
+                const images = Array.from(document.querySelectorAll<HTMLImageElement>(
+                  'img[src*="captcha" i], img[alt*="captcha" i], img[id*="captcha" i], img[class*="captcha" i]'
+                ));
+                if (images.some(isVisible)) return true;
+
+                // Check for third-party challenge iframes (Cloudflare Turnstile, reCAPTCHA, hCaptcha)
+                const iframes = Array.from(document.querySelectorAll<HTMLIFrameElement>(
+                  'iframe[src*="recaptcha" i], iframe[src*="turnstile" i], iframe[src*="hcaptcha" i], iframe[src*="challenges.cloudflare" i]'
+                ));
+                if (iframes.some(isVisible)) return true;
+
+                return false;
+              });
+
+              if (!domHasCaptcha) {
+                console.log('⚠️ Vision model reported CAPTCHA, but no visible CAPTCHA element found in DOM. Disregarding false positive.');
+                hasCaptcha = false;
+              } else {
+                console.log('✅ DOM verified visible CAPTCHA element is present.');
+              }
+            } catch (domError) {
+              console.warn('DOM CAPTCHA verification warning:', domError);
+            }
+          }
+        }
 
         const analysis = await vision.analyzePaymentPage(
           screenshot,
@@ -45,7 +105,7 @@ export function createPaymentTools(
           currentStep
         );
 
-        // Override hasCaptcha with dedicated detection result
+        // Override hasCaptcha with verified detection result
         analysis.hasCaptcha = hasCaptcha;
 
         console.log(`Page analysis complete. hasCaptcha: ${hasCaptcha}`);
