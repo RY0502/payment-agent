@@ -30,48 +30,11 @@ export function createPaymentTools(
   const analyzeCurrentPage = tool(
     async ({ paymentData, currentStep }) => {
       try {
-        const page = browser.getPage();
-        if (page) {
-          try {
-            const cookieBtn = page.locator('#bsesAcceptCookiesBtn:visible, button:has-text("Accept all cookies"):visible');
-            if (await cookieBtn.count() > 0) {
-              console.log('🍪 Dismissing cookie consent overlay before page analysis...');
-              await cookieBtn.first().click({ timeout: 2000 }).catch(() => {});
-              await page.waitForTimeout(500);
-            }
-          } catch {}
-        }
-
         const screenshot = await browser.captureScreenshot();
         const currentUrl = await browser.getCurrentUrl();
         const pageText = await browser.getPageText();
-
-        // Check for CAPTCHA in DOM using Playwright's native locator engine (avoids __name issues in page.evaluate)
-        let hasCaptcha = false;
+        const page = browser.getPage();
         const isVerifyQuickPay = currentUrl.toLowerCase().includes('verify-quickpay');
-
-        if (page) {
-          try {
-            if (isVerifyQuickPay) {
-              // On the verification page, the main content is CA confirmation, not a new captcha
-              hasCaptcha = false;
-            } else {
-              const captchaSelectors = [
-                'input[name*="captchaText" i]:visible',
-                'input[id*="captchaText" i]:visible',
-                'img[src*="captcha" i]:visible',
-                'iframe[src*="recaptcha" i]:visible',
-                'iframe[src*="turnstile" i]:visible',
-                'iframe[src*="hcaptcha" i]:visible',
-              ];
-              const captchaMatches = await page.locator(captchaSelectors.join(', ')).count();
-              hasCaptcha = captchaMatches > 0;
-            }
-            console.log(`DOM CAPTCHA detection result: ${hasCaptcha}`);
-          } catch (domError) {
-            console.warn('DOM CAPTCHA verification warning:', domError);
-          }
-        }
 
         const analysis = await vision.analyzePaymentPage(
           screenshot,
@@ -79,16 +42,78 @@ export function createPaymentTools(
           currentStep
         );
 
+        let hasCaptcha = Boolean(analysis.hasCaptcha);
+        console.log(`Vision model CAPTCHA detected from analysis: ${hasCaptcha}`);
+
+        // If vision detected a CAPTCHA, verify against the DOM to eliminate false positives
+        if (hasCaptcha) {
+          if (page) {
+            try {
+              const domHasCaptcha = await page.evaluate(() => {
+                const isVisible = (el: HTMLElement) => {
+                  const style = window.getComputedStyle(el);
+                  const rect = el.getBoundingClientRect();
+                  return (
+                    style.display !== 'none' &&
+                    style.visibility !== 'hidden' &&
+                    style.opacity !== '0' &&
+                    rect.width > 0 &&
+                    rect.height > 0
+                  );
+                };
+
+                // Check for CAPTCHA input fields
+                const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(
+                  'input[name*="captcha" i], input[id*="captcha" i], input[placeholder*="captcha" i], ' +
+                  'input[name*="code" i], input[id*="code" i], input[name*="verify" i], input[id*="verify" i]'
+                ));
+                const visibleInput = inputs.some((el) => {
+                  const nameOrId = ((el.name || '') + ' ' + (el.id || '')).toLowerCase();
+                  // Avoid false matches on postal code / promo code / pin code
+                  if (nameOrId.includes('zip') || nameOrId.includes('pin') || nameOrId.includes('postal') || nameOrId.includes('promo') || nameOrId.includes('coupon')) {
+                    return false;
+                  }
+                  return isVisible(el);
+                });
+                if (visibleInput) return true;
+
+                // Check for CAPTCHA images
+                const images = Array.from(document.querySelectorAll<HTMLImageElement>(
+                  'img[src*="captcha" i], img[alt*="captcha" i], img[id*="captcha" i], img[class*="captcha" i]'
+                ));
+                if (images.some(isVisible)) return true;
+
+                // Check for third-party challenge iframes (Cloudflare Turnstile, reCAPTCHA, hCaptcha)
+                const iframes = Array.from(document.querySelectorAll<HTMLIFrameElement>(
+                  'iframe[src*="recaptcha" i], iframe[src*="turnstile" i], iframe[src*="hcaptcha" i], iframe[src*="challenges.cloudflare" i]'
+                ));
+                if (iframes.some(isVisible)) return true;
+
+                return false;
+              });
+
+              if (!domHasCaptcha) {
+                console.log('⚠️ Vision model reported CAPTCHA, but no visible CAPTCHA element found in DOM. Disregarding false positive.');
+                hasCaptcha = false;
+              } else {
+                console.log('✅ DOM verified visible CAPTCHA element is present.');
+              }
+            } catch (domError) {
+              console.warn('DOM CAPTCHA verification warning:', domError);
+            }
+          }
+        }
+
         // Override hasCaptcha with verified detection result
         analysis.hasCaptcha = hasCaptcha;
 
         // Collect visible buttons on the page to provide unambiguous action targets
         let visibleButtons: string[] = [];
         try {
-          const buttonTexts = await page?.locator('button:visible, input[type="submit"]:visible, a.btn:visible, [role="button"]:visible').allInnerTexts() || [];
+          const buttonTexts = (await page?.locator('button:visible, input[type="submit"]:visible, a.btn:visible, [role="button"]:visible').allInnerTexts()) || [];
           visibleButtons = buttonTexts
-            .map(t => t.trim().replace(/[>→»›<←«‹\r\n\t]/g, '').trim())
-            .filter(t => t.length > 0 && t.length < 35);
+            .map((t: string) => t.trim().replace(/[>→»›<←«‹\r\n\t]/g, '').trim())
+            .filter((t: string) => t.length > 0 && t.length < 35);
           visibleButtons = Array.from(new Set(visibleButtons));
         } catch {}
 
