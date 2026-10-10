@@ -399,20 +399,49 @@ export function createPaymentTools(
           }
         }
 
-        // Strategy 0: Direct visible element locator matching text, id, or name (e.g. Next button on BSES)
+        // Strategy 0: Direct visible element locator matching text, id, or name (e.g. Next button on BSES, Pay on Jio)
         try {
           console.log(`🔍 Strategy 0: Direct locator for visible button matching "${targetDescription}"`);
-          const directSelectors = [
-            `button:has-text("${targetDescription}"):visible`,
-            `button[id*="${targetDescription}" i]:visible`,
-            `button[name*="${targetDescription}" i]:visible`,
-            `input[type="submit"][value*="${targetDescription}" i]:visible`,
-            `input[type="button"][value*="${targetDescription}" i]:visible`,
-            `a:has-text("${targetDescription}"):visible`,
-            `[role="button"]:has-text("${targetDescription}"):visible`,
+          
+          // 0A: Prioritize exact button/submit element matches
+          const exactButtonSelectors = [
+            `button:text-is("${targetDescription}"):visible`,
+            `button[aria-label="${targetDescription}" i]:visible`,
+            `[role="button"]:text-is("${targetDescription}"):visible`,
+            `[role="button"][aria-label="${targetDescription}" i]:visible`,
+            `input[type="submit"][value="${targetDescription}" i]:visible`,
+            `input[type="button"][value="${targetDescription}" i]:visible`,
           ];
-          const directLocator = page.locator(directSelectors.join(', '));
-          const directCount = await directLocator.count();
+          let directLocator = page.locator(exactButtonSelectors.join(', '));
+          let directCount = await directLocator.count();
+
+          // 0B: If no exact button match, try partial button matches (still prioritizing button elements over links)
+          if (directCount === 0) {
+            const partialButtonSelectors = [
+              `button:has-text("${targetDescription}"):visible`,
+              `button[id*="${targetDescription}" i]:visible`,
+              `button[name*="${targetDescription}" i]:visible`,
+              `input[type="submit"][value*="${targetDescription}" i]:visible`,
+              `input[type="button"][value*="${targetDescription}" i]:visible`,
+              `[role="button"]:has-text("${targetDescription}"):visible`,
+            ];
+            directLocator = page.locator(partialButtonSelectors.join(', '));
+            directCount = await directLocator.count();
+          }
+
+          // 0C: Only if no button elements match at all, fall back to link elements (exact matches first to avoid nav links)
+          if (directCount === 0) {
+            const linkSelectors = [
+              `a:text-is("${targetDescription}"):visible`,
+              `a[aria-label="${targetDescription}" i]:visible`,
+              `a.btn:has-text("${targetDescription}"):visible`,
+              `a[role="button"]:has-text("${targetDescription}"):visible`,
+              `a:has-text("${targetDescription}"):visible`,
+            ];
+            directLocator = page.locator(linkSelectors.join(', '));
+            directCount = await directLocator.count();
+          }
+
           if (directCount > 0) {
             console.log(`Found ${directCount} direct visible element(s) matching "${targetDescription}"`);
             const element = directLocator.first();
