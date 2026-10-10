@@ -70,13 +70,14 @@ const PaymentStateAnnotation = Annotation.Root({
 
 type PaymentState = typeof PaymentStateAnnotation.State;
 
-const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
+const TEXT_PROVIDER_PRIORITY = ["Requesty", "Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
 
 function buildTextOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
   const providers: Provider<LlmInput, string>[] = createTextProviders();
+  const getBaseName = (name: string) => name.replace(/ #\d+$/, "");
   const ordered = [...providers].sort((a, b) => {
-    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(a.name);
-    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(b.name);
+    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(getBaseName(a.name));
+    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(getBaseName(b.name));
     return (rankA === -1 ? TEXT_PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? TEXT_PROVIDER_PRIORITY.length : rankB);
   });
   return new FreeTierOrchestrator<LlmInput, string>(ordered);
@@ -104,20 +105,20 @@ function formatToolsDocumentation(toolsList: any[]): string {
 
 function formatConversationHistory(messages: any[]): string {
   const lines: string[] = [];
-  
+
   for (const msg of messages) {
     if (typeof msg === 'string') {
       lines.push(`User: ${msg}`);
     } else if (msg && typeof msg === 'object') {
       const type = msg._getType ? msg._getType() : (msg.constructor?.name || msg.role || 'message');
       const content = typeof msg.content === 'string' ? msg.content : (Array.isArray(msg.content) ? msg.content.join('\n') : JSON.stringify(msg.content));
-      
+
       if (type === 'human' || type === 'HumanMessage' || msg.role === 'user' || msg.role === 'human') {
         lines.push(`User:\n${content}`);
       } else if (type === 'ai' || type === 'AIMessage' || msg.role === 'assistant') {
         let text = `Assistant Thought: ${content || 'Deciding next action'}`;
         if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-          const calls = msg.tool_calls.map((tc: any) => 
+          const calls = msg.tool_calls.map((tc: any) =>
             `Tool Action: ${tc.name}(${JSON.stringify(tc.args || {})})`
           ).join('\n');
           text += `\n${calls}`;
@@ -131,27 +132,27 @@ function formatConversationHistory(messages: any[]): string {
       }
     }
   }
-  
+
   return lines.join('\n\n');
 }
 
 function parseModelToolResponse(responseText: string): { thought: string; toolCalls: Array<{ id: string; name: string; args: any }>; finalResponse?: string } {
   let cleanText = responseText.trim();
-  
+
   const jsonBlockMatch = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonBlockMatch) {
     cleanText = jsonBlockMatch[1].trim();
   }
-  
+
   const jsonMatch = cleanText.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[0]);
-      
+
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         const toolName = parsed.tool || parsed.name || parsed.tool_name || parsed.action || parsed.tool_call?.name;
         let toolArgs = parsed.args || parsed.arguments || parsed.parameters || parsed.tool_call?.args || {};
-        
+
         if (typeof toolArgs === 'string') {
           try {
             toolArgs = JSON.parse(toolArgs);
@@ -159,9 +160,9 @@ function parseModelToolResponse(responseText: string): { thought: string; toolCa
             // Keep toolArgs as string if not valid JSON
           }
         }
-        
+
         const thought = parsed.thought || parsed.reasoning || parsed.explanation || (toolName ? `Executing ${toolName}` : cleanText);
-        
+
         if (toolName && typeof toolName === 'string') {
           const toolCallId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           return {
@@ -173,33 +174,33 @@ function parseModelToolResponse(responseText: string): { thought: string; toolCa
             }],
           };
         }
-        
+
         if (Array.isArray(parsed.tools)) {
           const toolCalls = parsed.tools.map((t: any) => ({
             id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
             name: (t.tool || t.name || '').trim(),
             args: t.args || t.arguments || {},
           })).filter((tc: any) => tc.name);
-          
+
           if (toolCalls.length > 0) {
             return { thought, toolCalls };
           }
         }
-        
+
         return {
           thought,
           toolCalls: [],
           finalResponse: parsed.finalResponse || parsed.message || parsed.response || thought,
         };
       }
-      
+
       if (Array.isArray(parsed)) {
         const toolCalls = parsed.map((t: any) => ({
           id: `call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
           name: (t.tool || t.name || '').trim(),
           args: t.args || t.arguments || {},
         })).filter((tc: any) => tc.name);
-        
+
         return {
           thought: toolCalls.length > 0 ? `Executing ${toolCalls.map(t => t.name).join(', ')}` : cleanText,
           toolCalls,
@@ -209,7 +210,7 @@ function parseModelToolResponse(responseText: string): { thought: string; toolCa
       console.warn("Could not parse JSON from model output, falling back to plain text:", parseError);
     }
   }
-  
+
   return {
     thought: cleanText,
     toolCalls: [],

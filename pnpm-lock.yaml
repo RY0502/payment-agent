@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@freetier/orchestrator':
         specifier: github:RY0502/freetier-orchestrator
-        version: https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/720f9c64f3de58c1f0b5a3f5fa405ad45869dead(@langchain/langgraph@1.3.0(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))(openai@6.15.0(ws@8.18.3)(zod@4.3.6))(zod-to-json-schema@3.25.0(zod@4.3.6))(zod@4.3.6))
+        version: https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/66fdbae053571a5292407889abbce64d6e260cde(@langchain/langgraph@1.3.0(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))(openai@6.15.0(ws@8.18.3)(zod@4.3.6))(zod-to-json-schema@3.25.0(zod@4.3.6))(zod@4.3.6))
       '@langchain/anthropic':
         specifier: ^1.3.3
         version: 1.3.3(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))
@@ -529,8 +529,8 @@ packages:
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
 
-  '@freetier/orchestrator@https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/720f9c64f3de58c1f0b5a3f5fa405ad45869dead':
-    resolution: {tarball: https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/720f9c64f3de58c1f0b5a3f5fa405ad45869dead}
+  '@freetier/orchestrator@https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/66fdbae053571a5292407889abbce64d6e260cde':
+    resolution: {tarball: https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/66fdbae053571a5292407889abbce64d6e260cde}
     version: 0.1.0
     engines: {node: '>=20'}
     peerDependencies:
@@ -3123,7 +3123,7 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
-  '@freetier/orchestrator@https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/720f9c64f3de58c1f0b5a3f5fa405ad45869dead(@langchain/langgraph@1.3.0(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))(openai@6.15.0(ws@8.18.3)(zod@4.3.6))(zod-to-json-schema@3.25.0(zod@4.3.6))(zod@4.3.6))':
+  '@freetier/orchestrator@https://codeload.github.com/RY0502/freetier-orchestrator/tar.gz/66fdbae053571a5292407889abbce64d6e260cde(@langchain/langgraph@1.3.0(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))(openai@6.15.0(ws@8.18.3)(zod@4.3.6))(zod-to-json-schema@3.25.0(zod@4.3.6))(zod@4.3.6))':
     dependencies:
       '@langchain/langgraph': 1.3.0(@langchain/core@1.1.46(openai@6.15.0(ws@8.18.3)(zod@4.3.6)))(openai@6.15.0(ws@8.18.3)(zod@4.3.6))(zod-to-json-schema@3.25.0(zod@4.3.6))(zod@4.3.6)
 

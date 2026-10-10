@@ -1,6 +1,6 @@
 import {
   FreeTierOrchestrator,
-  createProviders,
+  createVisionProviders,
   type Provider,
   type LlmInput,
 } from "@freetier/orchestrator";
@@ -8,15 +8,16 @@ import { VisionAnalysisResult } from "./types.js";
 
 /**
  * Preferred provider failover order for vision calls.
- * Providers without a configured API key are automatically skipped by createProviders().
+ * Providers without a configured API key are automatically skipped by createVisionProviders().
  */
-const PROVIDER_PRIORITY = ["NVIDIA", "Cloudflare", "Groq"];
+const PROVIDER_PRIORITY = ["Requesty", "Cloudflare", "NVIDIA", "Groq"];
 
 function buildOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
-  const providers: Provider<LlmInput, string>[] = createProviders();
+  const providers: Provider<LlmInput, string>[] = createVisionProviders();
+  const getBaseName = (name: string) => name.replace(/ #\d+$/, "");
   const ordered = [...providers].sort((a, b) => {
-    const rankA = PROVIDER_PRIORITY.indexOf(a.name);
-    const rankB = PROVIDER_PRIORITY.indexOf(b.name);
+    const rankA = PROVIDER_PRIORITY.indexOf(getBaseName(a.name));
+    const rankB = PROVIDER_PRIORITY.indexOf(getBaseName(b.name));
     return (rankA === -1 ? PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? PROVIDER_PRIORITY.length : rankB);
   });
   return new FreeTierOrchestrator<LlmInput, string>(ordered);

@@ -72,13 +72,14 @@ const PaymentStateAnnotation = Annotation.Root({
 
 type PaymentState = typeof PaymentStateAnnotation.State;
 
-const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
+const TEXT_PROVIDER_PRIORITY = ["Cloudflare", "Requesty", "Groq", "NVIDIA", "Cerebras", "HuggingFace", "SambaNova"];
 
 function buildTextOrchestrator(): FreeTierOrchestrator<LlmInput, string> {
   const providers: Provider<LlmInput, string>[] = createTextProviders();
+  const getBaseName = (name: string) => name.replace(/ #\d+$/, "");
   const ordered = [...providers].sort((a, b) => {
-    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(a.name);
-    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(b.name);
+    const rankA = TEXT_PROVIDER_PRIORITY.indexOf(getBaseName(a.name));
+    const rankB = TEXT_PROVIDER_PRIORITY.indexOf(getBaseName(b.name));
     return (rankA === -1 ? TEXT_PROVIDER_PRIORITY.length : rankA) - (rankB === -1 ? TEXT_PROVIDER_PRIORITY.length : rankB);
   });
   return new FreeTierOrchestrator<LlmInput, string>(ordered);
@@ -297,7 +298,9 @@ async function ensureInitialized(paymentData?: any) {
   }
 }
 
-const PAYMENT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const PAYMENT_TIMEOUT_MS = process.env.PAYMENT_TIMEOUT_MS
+  ? parseInt(process.env.PAYMENT_TIMEOUT_MS, 10)
+  : 20 * 60 * 1000; // 20 minutes
 const paymentStartTime = new Map<string, number>();
 
 /**
@@ -483,9 +486,10 @@ Return ONLY the JSON object, no other text.`;
   
   const elapsed = Date.now() - paymentStartTime.get(sessionId)!;
   if (elapsed > PAYMENT_TIMEOUT_MS) {
-    console.error('Payment flow timeout: 10 minutes exceeded');
+    const minutes = Math.round(PAYMENT_TIMEOUT_MS / 60000);
+    console.error(`Payment flow timeout: ${minutes} minutes exceeded`);
     return {
-      error: 'Payment flow timeout: 10 minutes exceeded',
+      error: `Payment flow timeout: ${minutes} minutes exceeded`,
       attemptCount: state.maxAttempts, // Force cleanup
     };
   }
@@ -798,7 +802,8 @@ async function toolNode(state: PaymentState) {
   const sessionId = state.targetUrl;
   const elapsed = Date.now() - (paymentStartTime.get(sessionId) || Date.now());
   if (elapsed > PAYMENT_TIMEOUT_MS) {
-    console.error('Payment flow timeout during tool execution');
+    const minutes = Math.round(PAYMENT_TIMEOUT_MS / 60000);
+    console.error(`Payment flow timeout during tool execution (${minutes} minutes exceeded)`);
     
     // Close browser on timeout
     try {
@@ -810,7 +815,7 @@ async function toolNode(state: PaymentState) {
     }
     
     return {
-      error: 'Payment flow timeout: 10 minutes exceeded',
+      error: `Payment flow timeout: ${minutes} minutes exceeded`,
       attemptCount: state.maxAttempts, // Force cleanup
     };
   }
