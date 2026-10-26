@@ -166,6 +166,146 @@ export function createPaymentTools(
     }
   );
 
+  const enterOtpOnPage = async (page: any, code: string, autoSubmit: boolean = true): Promise<void> => {
+    // 1. Identify the active OTP context (e.g. modal/dialog or main page)
+    const modalContainer = page.locator('[role="dialog"]:visible, .modal:visible, div:has-text("Enter OTP"):visible, div:has-text("Login"):visible').last();
+    const root = (await modalContainer.count()) > 0 ? modalContainer : page;
+
+    // 2. Locate OTP inputs:
+    // First, try dedicated OTP selectors (aria-label, data-testid, autocomplete, name/id/class)
+    const specificOtpSelectors = [
+      'input[data-testid*="otp" i]:visible',
+      'input[aria-label*="otp" i]:visible',
+      'input[aria-label*="code" i]:visible',
+      'input[aria-label*="verification" i]:visible',
+      'input[autocomplete="one-time-code"]:visible',
+      'input[name*="otp" i]:visible',
+      'input[id*="otp" i]:visible',
+      'input[class*="otp" i]:visible',
+    ];
+
+    let targetInputs = await root.locator(specificOtpSelectors.join(', ')).all();
+    if (targetInputs.length === 0) {
+      targetInputs = await page.locator(specificOtpSelectors.join(', ')).all();
+    }
+
+    // Fallback: look for visible editable inputs in the active container or page
+    if (targetInputs.length === 0) {
+      const inputSelector =
+        'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([disabled]):not([readonly])';
+      const all = await root.locator(inputSelector).all();
+      const visible: any[] = [];
+      for (const input of all) {
+        if (await input.isVisible().catch(() => false)) visible.push(input);
+      }
+
+      // Check if there are inputs with maxlength="1"
+      const singleBoxes: any[] = [];
+      for (const input of visible) {
+        const ml = parseInt((await input.getAttribute('maxlength')) || '0', 10);
+        if (ml === 1) singleBoxes.push(input);
+      }
+
+      if (singleBoxes.length >= code.length) {
+        targetInputs = singleBoxes;
+      } else if (visible.length >= code.length && singleBoxes.length === 0 && visible.length === code.length) {
+        targetInputs = visible;
+      } else if (visible.length > 0) {
+        // Find input with hint in attributes
+        let found = null;
+        for (const input of visible) {
+          const ml = parseInt((await input.getAttribute('maxlength')) || '0', 10);
+          const hint = `${await input.getAttribute('name') || ''} ${await input.getAttribute('id') || ''} ${await input.getAttribute('placeholder') || ''} ${await input.getAttribute('aria-label') || ''} ${await input.getAttribute('autocomplete') || ''}`.toLowerCase();
+          if (hint.includes('otp') || hint.includes('code') || ml === code.length) {
+            found = input;
+            break;
+          }
+        }
+        targetInputs = [found || visible[visible.length - 1]];
+      }
+    }
+
+    if (targetInputs.length === 0) throw new Error('No visible OTP input found on page');
+
+    console.log(`🎯 Found ${targetInputs.length} OTP input element(s) for code length ${code.length}`);
+
+    // 3. Enter digits
+    if (targetInputs.length >= code.length) {
+      for (let i = 0; i < code.length; i++) {
+        const input = targetInputs[i];
+        await input.click();
+        await input.fill('');
+        await input.pressSequentially(code[i], { delay: 50 });
+        // Dispatch React input & change events
+        await input.evaluate((el: HTMLInputElement, digit: string) => {
+          el.value = digit;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, code[i]).catch(() => {});
+        await page.waitForTimeout(50);
+      }
+    } else {
+      const target = targetInputs[0];
+      await target.click();
+      await target.fill('');
+      await target.pressSequentially(code, { delay: 50 });
+      await target.evaluate((el: HTMLInputElement, val: string) => {
+        el.value = val;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, code).catch(() => {});
+    }
+
+    if (!autoSubmit) return;
+
+    // 4. Wait for UI to settle and enable the submit/login button
+    await page.waitForTimeout(600);
+
+    const submitSelectors = [
+      'button[data-testid*="login" i]:visible',
+      'button[data-testid*="submit" i]:visible',
+      'button.lego-lr-otp-submit:visible',
+      'button:text-is("LOGIN"):visible',
+      'button:has-text("LOGIN"):visible',
+      'button:text-is("LOG IN"):visible',
+      'button:has-text("LOG IN"):visible',
+      'button:text-is("SIGN IN"):visible',
+      'button:has-text("SIGN IN"):visible',
+      'button[type=submit]:visible',
+      'input[type=submit]:visible',
+      '[role="button"]:has-text("LOGIN"):visible',
+      '[role="button"]:has-text("SUBMIT"):visible',
+      '[role="button"]:has-text("VERIFY"):visible',
+    ];
+
+    let submit = root.locator(submitSelectors.join(', ')).first();
+    if (await submit.count() === 0) {
+      submit = page.locator(submitSelectors.join(', ')).first();
+    }
+    if (await submit.count() === 0) {
+      submit = page.getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|validate|login|log in|sign in|pay|next|done|ok)\b/i }).first();
+    }
+
+    if (await submit.count()) {
+      // Wait if disabled (up to 3 seconds) for React form validation
+      for (let i = 0; i < 6; i++) {
+        if (await submit.isEnabled().catch(() => false)) break;
+        await page.waitForTimeout(500);
+      }
+
+      try {
+        await submit.click({ timeout: 2000 });
+        console.log(`✅ Clicked OTP submit/login button`);
+      } catch {
+        await submit.evaluate((el: HTMLElement) => el.click());
+        console.log(`✅ Clicked OTP submit/login button via JS click`);
+      }
+      return;
+    }
+
+    throw new Error('Submit/Login button not found after entering OTP');
+  };
+
   const fillFormField = tool(
     async ({ fieldDescription, value }) => {
       try {
@@ -184,6 +324,17 @@ export function createPaymentTools(
             await page.waitForTimeout(500);
           }
         } catch {}
+
+        // Strategy OTP: Direct match for OTP / Verification Code field
+        if (/otp|verification\s*code|one-time/i.test(fieldDescription.trim())) {
+          console.log(`🎯 Strategy OTP: Entering OTP code into page for "${fieldDescription}"`);
+          try {
+            await enterOtpOnPage(page, value, false);
+            return `Successfully entered OTP code "${value}" into OTP input fields. Now click the login/submit button to proceed.`;
+          } catch (otpErr) {
+            console.log(`❌ Strategy OTP failed: ${otpErr}`);
+          }
+        }
 
         // Strategy 0: Direct match for CA Number / Account Number on BSES & Utility sites (visible only)
         if (/ca.*number|account.*number|^ca$|^account$/i.test(fieldDescription.trim())) {
@@ -451,6 +602,24 @@ export function createPaymentTools(
             try {
               await page.waitForSelector('.Loader_preloader__2jBNF, [class*="loader"], [class*="spinner"]', { state: 'hidden', timeout: 3000 });
             } catch (loaderError) {}
+
+            // If button is currently disabled, wait briefly for validation to enable it
+            const isCurrentlyDisabled = !(await element.isEnabled().catch(() => true));
+            if (isCurrentlyDisabled) {
+              console.log(`⚠️ Button "${targetDescription}" is currently disabled, waiting up to 2.5s for it to become enabled...`);
+              let becameEnabled = false;
+              for (let i = 0; i < 5; i++) {
+                await page.waitForTimeout(500);
+                if (await element.isEnabled().catch(() => false)) {
+                  becameEnabled = true;
+                  break;
+                }
+              }
+              if (!becameEnabled) {
+                return `Button "${buttonDescription}" is currently disabled. Please ensure all required fields (such as OTP or account details) are filled before clicking.`;
+              }
+              console.log(`✅ Button "${targetDescription}" became enabled`);
+            }
 
             try {
               await element.click({ timeout: 3000 });
@@ -1819,71 +1988,6 @@ export function createPaymentTools(
     return digits.length > 0 ? digits : null;
   };
 
-  const enterOtpOnPage = async (page: any, code: string): Promise<void> => {
-    const inputSelector =
-      'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([disabled]):not([readonly])';
-    const all = await page.locator(inputSelector).all();
-    const visible: any[] = [];
-    for (const input of all) {
-      if (await input.isVisible().catch(() => false)) visible.push(input);
-    }
-    if (visible.length === 0) throw new Error('No visible OTP input found on page');
-
-    const maxLengthOf = async (input: any) =>
-      parseInt((await input.getAttribute('maxlength')) || '0', 10);
-
-    // Prefer a group of single-digit boxes; otherwise a single field takes the whole code
-    const singleBoxes: any[] = [];
-    for (const input of visible) {
-      if ((await maxLengthOf(input)) === 1) singleBoxes.push(input);
-    }
-
-    if (singleBoxes.length >= code.length) {
-      for (let i = 0; i < code.length; i++) {
-        await singleBoxes[i].click();
-        await singleBoxes[i].fill('');
-        await singleBoxes[i].pressSequentially(code[i], { delay: 50 });
-      }
-    } else if (visible.length >= code.length && singleBoxes.length === 0 && visible.length === code.length) {
-      for (let i = 0; i < code.length; i++) {
-        await visible[i].click();
-        await visible[i].fill(code[i]);
-      }
-    } else {
-      let target = visible[0];
-      for (const input of visible) {
-        const ml = await maxLengthOf(input);
-        const hint = `${await input.getAttribute('name') || ''} ${await input.getAttribute('id') || ''} ${await input.getAttribute('placeholder') || ''} ${await input.getAttribute('autocomplete') || ''}`.toLowerCase();
-        if (hint.includes('otp') || hint.includes('code') || ml === code.length) {
-          target = input;
-          break;
-        }
-      }
-      await target.click();
-      await target.fill(code);
-    }
-
-    // Wait for the UI to settle, then click the submit button
-    await page.waitForTimeout(500);
-    const submit = page
-      .locator(
-        'button[type=submit]:visible, input[type=submit]:visible'
-      )
-      .first();
-    if (await submit.count()) {
-      await submit.click();
-      return;
-    }
-    const byText = page
-      .getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|validate)/i })
-      .first();
-    if (await byText.count()) {
-      await byText.click();
-      return;
-    }
-    throw new Error('Submit button not found after entering OTP');
-  };
-
   const getOtp = tool(
     async () => {
       const notificationUrl = process.env.OTP_NOTIFICATION_URL;
@@ -1935,20 +2039,16 @@ export function createPaymentTools(
       try {
         const page = browser.getPage();
         if (!page) {
-          return JSON.stringify({ success: false, error: 'Browser page not available', otp: code });
+          return otpFailure('Browser page not available');
         }
-        await enterOtpOnPage(page, code);
+        await enterOtpOnPage(page, code, true);
         await page.waitForTimeout(2000);
         return JSON.stringify({
           success: true,
-          message: 'OTP received, entered digit by digit and submit button clicked. Analyze the page to proceed.',
+          message: 'OTP received, entered into OTP inputs and submit button clicked. Analyze the page to proceed.',
         }, null, 2);
       } catch (error) {
-        return JSON.stringify({
-          success: false,
-          error: `OTP received but entering it failed: ${error}`,
-          otp: code,
-        }, null, 2);
+        return otpFailure(`OTP received (${code}) but entering it failed: ${error}`);
       }
     },
     {

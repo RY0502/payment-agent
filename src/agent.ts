@@ -686,7 +686,9 @@ CRITICAL: After wait_for_payment returns failure or timeout:
 
 OTP HANDLING:
 - If the page asks for an OTP/verification code, call get_otp({}) ONCE. It notifies the user and waits up to 5 minutes, then enters the digits and clicks submit itself.
-- If get_otp returns fatal=true, the payment has failed - do not retry.
+- If get_otp returns fatal=true or success=false, the OTP step has failed - do not retry.
+- NEVER click LOGIN, SUBMIT, or PROCEED if OTP has not been entered into the browser.
+- NEVER proceed to click login buttons when verification/OTP inputs are empty.
 
 DIALOG/POPUP HANDLING:
 - Some websites show dialogs/popups after filling inputs or clicking buttons
@@ -849,7 +851,7 @@ async function toolNode(state: PaymentState) {
         if (toolCall.name === 'get_otp') {
           try {
             const parsedResult = JSON.parse(result);
-            if (parsedResult.fatal === true) {
+            if (parsedResult.fatal === true || parsedResult.success === false) {
               fatalToolError = parsedResult.error || 'OTP step failed';
             }
           } catch (parseError) {
