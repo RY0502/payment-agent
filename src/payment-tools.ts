@@ -1,5 +1,6 @@
 import { tool } from "langchain";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { BrowserManager } from "./browser.js";
 import { VisionAnalyzer } from "./vision.js";
 
@@ -1789,6 +1790,174 @@ export function createPaymentTools(
     }
   );
 
+  const OTP_POLL_INTERVAL_MS = 30_000;
+  const OTP_TOTAL_WAIT_MS = 5 * 60_000;
+
+  const otpFailure = (message: string) =>
+    JSON.stringify({ success: false, fatal: true, error: message }, null, 2);
+
+  const fetchOtpCode = async (
+    lookupUrl: string,
+    anonKey: string,
+    identifier: string
+  ): Promise<string | null> => {
+    const response = await fetch(lookupUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${anonKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ identifier }),
+    });
+    if (!response.ok) {
+      throw new Error(`lookup returned ${response.status}: ${await response.text()}`);
+    }
+    const data: any = await response.json();
+    const code = data?.code;
+    if (code === null || code === undefined) return null;
+    const digits = String(code).replace(/\D/g, '');
+    return digits.length > 0 ? digits : null;
+  };
+
+  const enterOtpOnPage = async (page: any, code: string): Promise<void> => {
+    const inputSelector =
+      'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([disabled]):not([readonly])';
+    const all = await page.locator(inputSelector).all();
+    const visible: any[] = [];
+    for (const input of all) {
+      if (await input.isVisible().catch(() => false)) visible.push(input);
+    }
+    if (visible.length === 0) throw new Error('No visible OTP input found on page');
+
+    const maxLengthOf = async (input: any) =>
+      parseInt((await input.getAttribute('maxlength')) || '0', 10);
+
+    // Prefer a group of single-digit boxes; otherwise a single field takes the whole code
+    const singleBoxes: any[] = [];
+    for (const input of visible) {
+      if ((await maxLengthOf(input)) === 1) singleBoxes.push(input);
+    }
+
+    if (singleBoxes.length >= code.length) {
+      for (let i = 0; i < code.length; i++) {
+        await singleBoxes[i].click();
+        await singleBoxes[i].fill('');
+        await singleBoxes[i].pressSequentially(code[i], { delay: 50 });
+      }
+    } else if (visible.length >= code.length && singleBoxes.length === 0 && visible.length === code.length) {
+      for (let i = 0; i < code.length; i++) {
+        await visible[i].click();
+        await visible[i].fill(code[i]);
+      }
+    } else {
+      let target = visible[0];
+      for (const input of visible) {
+        const ml = await maxLengthOf(input);
+        const hint = `${await input.getAttribute('name') || ''} ${await input.getAttribute('id') || ''} ${await input.getAttribute('placeholder') || ''} ${await input.getAttribute('autocomplete') || ''}`.toLowerCase();
+        if (hint.includes('otp') || hint.includes('code') || ml === code.length) {
+          target = input;
+          break;
+        }
+      }
+      await target.click();
+      await target.fill(code);
+    }
+
+    // Wait for the UI to settle, then click the submit button
+    await page.waitForTimeout(500);
+    const submit = page
+      .locator(
+        'button[type=submit]:visible, input[type=submit]:visible'
+      )
+      .first();
+    if (await submit.count()) {
+      await submit.click();
+      return;
+    }
+    const byText = page
+      .getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|validate)/i })
+      .first();
+    if (await byText.count()) {
+      await byText.click();
+      return;
+    }
+    throw new Error('Submit button not found after entering OTP');
+  };
+
+  const getOtp = tool(
+    async () => {
+      const notificationUrl = process.env.OTP_NOTIFICATION_URL;
+      const lookupUrl = process.env.OTP_LOOKUP_URL;
+      const anonKey = process.env.SUPABASE_ANON_KEY;
+      if (!notificationUrl || !lookupUrl || !anonKey) {
+        return otpFailure('OTP service not configured (OTP_NOTIFICATION_URL, OTP_LOOKUP_URL, SUPABASE_ANON_KEY required)');
+      }
+
+      const identifier = randomUUID();
+      try {
+        console.log(`📱 Sending OTP request notification (identifier: ${identifier})`);
+        const response = await fetch(notificationUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${anonKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: 'Please enter the OTP code received for the payment',
+            identifier,
+          }),
+        });
+        if (!response.ok) {
+          return otpFailure(`OTP push notification failed: ${response.status} ${await response.text()}`);
+        }
+      } catch (error) {
+        return otpFailure(`OTP push notification failed: ${error}`);
+      }
+
+      const start = Date.now();
+      let code: string | null = null;
+      for (let attempt = 1; Date.now() - start < OTP_TOTAL_WAIT_MS; attempt++) {
+        const remaining = OTP_TOTAL_WAIT_MS - (Date.now() - start);
+        await new Promise((r) => setTimeout(r, Math.min(OTP_POLL_INTERVAL_MS, remaining)));
+        try {
+          code = await fetchOtpCode(lookupUrl, anonKey, identifier);
+        } catch (error) {
+          console.error(`OTP lookup attempt ${attempt} failed:`, error);
+        }
+        if (code) break;
+        console.log(`⏳ OTP not received yet (attempt ${attempt})`);
+      }
+
+      if (!code) {
+        return otpFailure('OTP not received within 5 minutes');
+      }
+
+      try {
+        const page = browser.getPage();
+        if (!page) {
+          return JSON.stringify({ success: false, error: 'Browser page not available', otp: code });
+        }
+        await enterOtpOnPage(page, code);
+        await page.waitForTimeout(2000);
+        return JSON.stringify({
+          success: true,
+          message: 'OTP received, entered digit by digit and submit button clicked. Analyze the page to proceed.',
+        }, null, 2);
+      } catch (error) {
+        return JSON.stringify({
+          success: false,
+          error: `OTP received but entering it failed: ${error}`,
+          otp: code,
+        }, null, 2);
+      }
+    },
+    {
+      name: "get_otp",
+      description: "Use when the page asks for an OTP / verification code (usually a row of separate digit boxes). Sends a push notification to the user's phone and then WAITS up to 5 minutes (polling every 30 seconds) for the user to supply the code. This call is slow and blocks until the OTP arrives or times out - do NOT call it repeatedly or in parallel. On receipt, it automatically types each digit into its own input box and clicks the submit button. If it returns success=false with fatal=true (notification failed or no OTP within 5 minutes), the payment has failed: stop and do not retry. After success, analyze the page to continue.",
+      schema: z.object({}),
+    }
+  );
+
   return [
     navigateToWebsite,
     analyzeCurrentPage,
@@ -1803,5 +1972,6 @@ export function createPaymentTools(
     handleDialog,
     waitForPayment,
     scanUpiQrCode,
+    getOtp,
   ];
 }
