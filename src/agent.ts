@@ -108,7 +108,8 @@ function formatToolsDocumentation(toolsList: any[]): string {
     solve_captcha: `solve_captcha({}) - Read and return CAPTCHA text using vision AI`,
     handle_dialog: `handle_dialog({ "action": "accept"|"dismiss", "promptText": "text" }) - Accept or dismiss browser popup dialog`,
     wait_for_payment: `wait_for_payment({}) - Wait 3 minutes for payment completion after QR scan or UPI submit`,
-    scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`
+    scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`,
+    get_otp: `get_otp({}) - When page asks for OTP: notifies user, waits up to 5 minutes for the code, types each digit and clicks submit. Fatal on failure/timeout`
   };
 
   return toolsList.map(t => descriptions[t.name] || `${t.name} - ${t.description || "Execute " + t.name}`).join('\n');
@@ -683,6 +684,10 @@ CRITICAL: After wait_for_payment returns failure or timeout:
 - The payment has failed - accept this and stop
 - The system will automatically clean up and report failure
 
+OTP HANDLING:
+- If the page asks for an OTP/verification code, call get_otp({}) ONCE. It notifies the user and waits up to 5 minutes, then enters the digits and clicks submit itself.
+- If get_otp returns fatal=true, the payment has failed - do not retry.
+
 DIALOG/POPUP HANDLING:
 - Some websites show dialogs/popups after filling inputs or clicking buttons
 - If you see a dialog message in console logs, use handle_dialog tool
@@ -826,6 +831,7 @@ async function toolNode(state: PaymentState) {
   const toolMessages = [];
   let waitForPaymentSuccess = false;
   let checkPaymentSuccessResult: any = null;
+  let fatalToolError: string | null = null;
   
   for (const toolCall of toolCalls) {
     const tool = tools.find((t) => t.name === toolCall.name);
@@ -840,6 +846,17 @@ async function toolNode(state: PaymentState) {
           })
         );
         
+        if (toolCall.name === 'get_otp') {
+          try {
+            const parsedResult = JSON.parse(result);
+            if (parsedResult.fatal === true) {
+              fatalToolError = parsedResult.error || 'OTP step failed';
+            }
+          } catch (parseError) {
+            // Result not JSON
+          }
+        }
+
         // Check if wait_for_payment returned success
         if (toolCall.name === 'wait_for_payment') {
           try {
@@ -878,6 +895,16 @@ async function toolNode(state: PaymentState) {
   }
 
   const currentUrl = await browser!.getCurrentUrl();
+
+  if (fatalToolError) {
+    console.error(`Payment failed at OTP step: ${fatalToolError}`);
+    return {
+      messages: toolMessages,
+      currentUrl,
+      error: `Payment failed at OTP step: ${fatalToolError}`,
+      attemptCount: state.maxAttempts, // Force cleanup
+    };
+  }
 
   if (checkPaymentSuccessResult) {
     return {
