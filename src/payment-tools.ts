@@ -189,6 +189,19 @@ export function createPaymentTools(
       targetInputs = await page.locator(specificOtpSelectors.join(', ')).all();
     }
 
+    // Check iframes for OTP inputs (common on bank 3D Secure / gateway pages)
+    if (targetInputs.length === 0) {
+      for (const frame of page.frames()) {
+        try {
+          const frameInputs = await frame.locator(specificOtpSelectors.join(', ')).all();
+          if (frameInputs.length > 0) {
+            targetInputs = frameInputs;
+            break;
+          }
+        } catch {}
+      }
+    }
+
     // Fallback: look for visible editable inputs in the active container or page
     if (targetInputs.length === 0) {
       const inputSelector =
@@ -284,6 +297,17 @@ export function createPaymentTools(
     }
     if (await submit.count() === 0) {
       submit = page.getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|validate|login|log in|sign in|pay|next|done|ok)\b/i }).first();
+    }
+    if (await submit.count() === 0) {
+      for (const frame of page.frames()) {
+        try {
+          const frameSubmit = frame.locator(submitSelectors.join(', ')).first();
+          if (await frameSubmit.count() > 0) {
+            submit = frameSubmit;
+            break;
+          }
+        } catch {}
+      }
     }
 
     if (await submit.count()) {
