@@ -97,7 +97,8 @@ function formatToolsDocumentation(toolsList: any[]): string {
     solve_captcha: `solve_captcha({}) - Read and return CAPTCHA text using vision AI`,
     handle_dialog: `handle_dialog({ "action": "accept"|"dismiss", "promptText": "text" }) - Accept or dismiss browser popup dialog`,
     wait_for_payment: `wait_for_payment({}) - Wait 3 minutes for payment completion after QR scan or UPI submit`,
-    scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`
+    scan_upi_qr_code: `scan_upi_qr_code({}) - Extract QR code image URL from payment page`,
+    get_otp: `get_otp({}) - When page asks for OTP: notifies user, waits up to 5 minutes for the code, types each digit and clicks submit. Fatal on failure/timeout`
   };
 
   return toolsList.map(t => descriptions[t.name] || `${t.name} - ${t.description || "Execute " + t.name}`).join('\n');
